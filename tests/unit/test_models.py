@@ -36,3 +36,29 @@ def test_lead_external_id_is_unique():
     assert col.unique or any(
         idx.unique for idx in Lead.__table__.indexes if "external_id" in {c.name for c in idx.columns}
     )
+
+
+from src.models.prediction import Prediction
+
+
+def test_prediction_table_name():
+    assert Prediction.__tablename__ == "predictions"
+
+
+def test_prediction_has_expected_columns():
+    col_names = {c.name for c in Prediction.__table__.columns}
+    expected = {
+        "id", "lead_id", "score", "bucket", "model_version",
+        "feature_snapshot", "top_factors", "scored_at",
+        "created_at", "updated_at",
+    }
+    assert expected == col_names
+
+
+def test_prediction_bucket_has_check_constraint():
+    # Verify CHECK constraint exists on the table
+    check_constraints = [
+        c for c in Prediction.__table__.constraints
+        if c.__class__.__name__ == "CheckConstraint"
+    ]
+    assert len(check_constraints) > 0

@@ -62,3 +62,36 @@ def test_prediction_bucket_has_check_constraint():
         if c.__class__.__name__ == "CheckConstraint"
     ]
     assert len(check_constraints) > 0
+
+
+from src.models.model_registry import ModelRegistry
+
+
+def test_model_registry_table_name():
+    assert ModelRegistry.__tablename__ == "model_registry"
+
+
+def test_model_registry_has_expected_columns():
+    col_names = {c.name for c in ModelRegistry.__table__.columns}
+    expected = {
+        "id", "version", "artifact_path", "metrics", "hyperparameters",
+        "feature_columns", "is_active", "trained_at",
+        "created_at", "updated_at",
+    }
+    assert expected == col_names
+
+
+def test_model_registry_version_is_unique():
+    col = ModelRegistry.__table__.c.version
+    assert col.unique or any(
+        idx.unique for idx in ModelRegistry.__table__.indexes if "version" in {c.name for c in idx.columns}
+    )
+
+
+def test_model_registry_has_partial_index_on_is_active():
+    partial_indexes = [
+        idx for idx in ModelRegistry.__table__.indexes
+        if "is_active" in {c.name for c in idx.columns if hasattr(c, "name")}
+        and idx.dialect_kwargs.get("postgresql_where") is not None
+    ]
+    assert len(partial_indexes) > 0

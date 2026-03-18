@@ -95,3 +95,28 @@ def test_model_registry_has_partial_index_on_is_active():
         and idx.dialect_kwargs.get("postgresql_where") is not None
     ]
     assert len(partial_indexes) > 0
+
+
+from src.models.crm_sync_log import CRMSyncLog
+
+
+def test_crm_sync_log_table_name():
+    assert CRMSyncLog.__tablename__ == "crm_sync_log"
+
+
+def test_crm_sync_log_has_expected_columns():
+    col_names = {c.name for c in CRMSyncLog.__table__.columns}
+    expected = {
+        "id", "lead_id", "source_system", "external_id", "action",
+        "payload", "status", "error_message", "synced_at",
+        "created_at", "updated_at",
+    }
+    assert expected == col_names
+
+
+def test_crm_sync_log_status_has_check_constraint():
+    check_constraints = [
+        c for c in CRMSyncLog.__table__.constraints
+        if c.__class__.__name__ == "CheckConstraint"
+    ]
+    assert len(check_constraints) > 0

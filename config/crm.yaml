@@ -1,0 +1,133 @@
+# CRM Field Mappings
+#
+# Maps internal field names to CRM-specific field names.
+# Supports both HubSpot and Salesforce with different field naming conventions.
+
+version: "1.0"
+
+# ============================================
+# HubSpot Field Mappings
+# ============================================
+hubspot:
+  # Contact properties we read from HubSpot
+  contact_fields:
+    email: email
+    first_name: firstname
+    last_name: lastname
+    company_name: company
+    company_size: numberofemployees
+    job_title: jobtitle
+    industry: industry
+    phone: phone
+    lifecycle_stage: lifecyclestage
+    lead_status: hs_lead_status
+    created_at: createdate
+    updated_at: lastmodifieddate
+
+  # Properties we write back to HubSpot (must be created in HubSpot first)
+  output_fields:
+    score: lead_score
+    bucket: lead_score_bucket
+    top_factors: lead_score_factors
+    scored_at: lead_score_updated
+    model_version: lead_score_model_version
+
+  # Event type mappings
+  event_types:
+    pageview: PAGE_VIEW
+    email_open: EMAIL_OPEN
+    email_click: EMAIL_CLICK
+    form_submit: FORM_SUBMISSION
+    meeting_booked: MEETING_BOOKED
+
+# ============================================
+# Salesforce Field Mappings
+# ============================================
+salesforce:
+  # Object type (Lead or Contact)
+  object_type: Lead  # or Contact
+
+  # Fields we read from Salesforce
+  contact_fields:
+    email: Email
+    first_name: FirstName
+    last_name: LastName
+    company_name: Company
+    company_size: NumberOfEmployees
+    job_title: Title
+    industry: Industry
+    phone: Phone
+    lead_status: Status
+    created_at: CreatedDate
+    updated_at: LastModifiedDate
+
+  # Custom fields we write back (must be created in Salesforce first)
+  # Note: Custom fields in Salesforce end with __c
+  output_fields:
+    score: Lead_Score__c
+    bucket: Lead_Score_Bucket__c
+    top_factors: Lead_Score_Factors__c
+    scored_at: Lead_Score_Updated__c
+    model_version: Lead_Score_Model_Version__c
+
+  # Salesforce doesn't have the same event tracking
+  # You'd typically query Task, Event, or custom objects
+  event_objects:
+    email: EmailMessage
+    task: Task
+    event: Event
+
+# ============================================
+# Company Size Normalization
+# ============================================
+# Maps various CRM values to our internal buckets
+company_size_mapping:
+  # Raw values from CRM -> internal bucket
+  "1": "1-10"
+  "2": "1-10"
+  "3": "1-10"
+  "4": "1-10"
+  "5": "1-10"
+  "6": "1-10"
+  "7": "1-10"
+  "8": "1-10"
+  "9": "1-10"
+  "10": "1-10"
+  "11-50": "11-50"
+  "51-200": "51-200"
+  "201-500": "201-1000"
+  "501-1000": "201-1000"
+  "1001-5000": "1000+"
+  "5001-10000": "1000+"
+  "10000+": "1000+"
+
+# ============================================
+# Ideal Customer Profile (ICP)
+# ============================================
+icp:
+  # Industries that match our ICP
+  target_industries:
+    - "Technology"
+    - "Software"
+    - "SaaS"
+    - "Information Technology"
+    - "Computer Software"
+    - "Internet"
+    - "Financial Services"
+    - "Marketing and Advertising"
+
+  # Minimum company size for ICP
+  min_company_size: "11-50"
+
+  # Job titles indicating decision-maker authority
+  decision_maker_titles:
+    - "CEO"
+    - "CTO"
+    - "CFO"
+    - "COO"
+    - "CMO"
+    - "VP"
+    - "Vice President"
+    - "Director"
+    - "Head of"
+    - "Chief"

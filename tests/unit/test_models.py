@@ -120,3 +120,12 @@ def test_crm_sync_log_status_has_check_constraint():
         if c.__class__.__name__ == "CheckConstraint"
     ]
     assert len(check_constraints) > 0
+
+
+def test_models_init_exports_all_models():
+    from src.models import Base, Lead, Prediction, ModelRegistry, CRMSyncLog
+    assert Base is not None
+    assert Lead is not None
+    assert Prediction is not None
+    assert ModelRegistry is not None
+    assert CRMSyncLog is not None

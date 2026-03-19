@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from src.services.ingestion import replace_placeholders, convert_booleans, coerce_numerics, rename_columns, validate_required_fields
+from src.services.ingestion import replace_placeholders, convert_booleans, coerce_numerics, rename_columns, validate_required_fields, clean_dataframe
 
 
 def test_replace_placeholders_replaces_select():
@@ -132,3 +132,38 @@ def test_validate_required_fields_rejects_missing_external_id():
     assert len(valid) == 1
     assert valid["external_id"].iloc[0] == "abc-001"
     assert len(rejected) == 3
+
+
+def test_clean_dataframe_end_to_end():
+    """Full pipeline test using fixture-like data."""
+    df = pd.DataFrame({
+        "Prospect ID": ["abc-001", "abc-002"],
+        "Lead Origin": ["API", "Landing Page"],
+        "Lead Source": ["Google", "Select"],
+        "Do Not Email": ["No", "Yes"],
+        "Do Not Call": ["No", "No"],
+        "Converted": [1, 0],
+        "TotalVisits": ["5", ""],
+        "Total Time Spent on Website": ["300", "abc"],
+        "Page Views Per Visit": ["2.5", "0"],
+        "Last Activity": ["Email Opened", "Select"],
+        "Country": ["India", "  "],
+        "Specialization": ["Data Science", "Select"],
+        "What is your current occupation": ["Working Professional", ""],
+        "City": ["Mumbai", "  Delhi  "],
+        "Tags": ["Interested", ""],
+        "Lead Number": [660737, 660738],
+    })
+    result = clean_dataframe(df)
+    assert "external_id" in result.columns
+    assert "Lead Number" not in result.columns
+    assert result["external_id"].iloc[0] == "abc-001"
+    assert result["do_not_email"].iloc[0] is False
+    assert result["converted"].iloc[0] is True
+    assert result["total_visits"].iloc[0] == 5.0
+    assert pd.isna(result["lead_source"].iloc[1])
+    assert pd.isna(result["last_activity"].iloc[1])
+    assert pd.isna(result["specialization"].iloc[1])
+    assert pd.isna(result["country"].iloc[1])
+    assert result["city"].iloc[1] == "Delhi"
+    assert pd.isna(result["total_visits"].iloc[1])

@@ -25,6 +25,8 @@ class DatabaseSettings(BaseSettings):
     user: str = "postgres"
     password: str = "postgres"
     name: str = "lead_scoring"
+    pool_size: int = 5
+    max_overflow: int = 10
 
     @computed_field
     @property

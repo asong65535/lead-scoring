@@ -129,3 +129,19 @@ def test_models_init_exports_all_models():
     assert Prediction is not None
     assert ModelRegistry is not None
     assert CRMSyncLog is not None
+
+
+from src.models.database import async_engine, AsyncSessionLocal, get_session
+
+
+def test_async_engine_exists():
+    assert async_engine is not None
+
+
+def test_async_session_local_exists():
+    assert AsyncSessionLocal is not None
+
+
+def test_get_session_is_async_generator():
+    import inspect
+    assert inspect.isasyncgenfunction(get_session)

@@ -83,3 +83,7 @@ dmypy.json
 
 # ruff
 .ruff_cache/
+
+# llm
+.claude/
+docs/superpowers/

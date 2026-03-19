@@ -1,0 +1,7 @@
+Prospect ID,Lead Origin,Lead Source,Do Not Email,Do Not Call,Converted,TotalVisits,Total Time Spent on Website,Page Views Per Visit,Last Activity,Country,Specialization,What is your current occupation,City,Tags
+abc-001,API,Google,No,No,1,5,300,2.5,Email Opened,India,Data Science,Working Professional,Mumbai,Interested in courses
+abc-002,API,Organic Search,Yes,No,0,,,0,Page Visited on Website,Select,Select,Select,Select,Ringing
+abc-003,Landing Page,Direct Traffic,No,Yes,1,3,120,1.5,SMS Sent,,,,Bangalore,
+,API,Google,No,No,1,10,500,5.0,Email Opened,India,Finance,Unemployed,Delhi,Will revert after reading the email
+abc-005,API,Organic Search,maybe,nah,0,abc,not_a_number,xyz,Email Opened,India,Data Science,Working Professional,Mumbai,Interested in courses
+abc-006,API,Google,No,No,,8,400,3.0,Email Opened,  ,  Specialization  ,Working Professional,  Mumbai  ,

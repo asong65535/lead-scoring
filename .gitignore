@@ -59,6 +59,7 @@ models/*.pkl
 data/*
 !data/.gitkeep
 *.csv
+!tests/fixtures/*.csv
 *.parquet
 
 # Logs

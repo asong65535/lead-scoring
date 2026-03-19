@@ -22,9 +22,10 @@ services:
     env_file:
       - .env
     volumes:
-      # Mount source code for hot reloading in development
       - ./src:/app/src:ro
       - ./config:/app/config:ro
+      - ./alembic:/app/alembic:ro
+      - ./alembic.ini:/app/alembic.ini:ro
       - ./models:/app/models
       - ./data:/app/data
     depends_on:

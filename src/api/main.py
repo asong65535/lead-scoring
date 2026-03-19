@@ -16,33 +16,23 @@ from src.api.routes import health
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """
-    Application lifespan manager.
-    
-    Handles startup and shutdown tasks:
-    - Startup: Load ML model, establish DB connection pool
-    - Shutdown: Close connections, cleanup resources
-    """
     settings = get_settings()
-    
-    # === Startup ===
+
     print(f"Starting {settings.app_name} v{settings.app_version}")
     print(f"Environment: {settings.environment}")
     print(f"Debug mode: {settings.debug}")
-    
-    # TODO: Initialize database connection pool
+
     # TODO: Load ML model into memory
-    
-    # Store shared resources in app.state
+
     app.state.settings = settings
     app.state.model = None  # Will be loaded in Phase 5
     
     yield
-    
-    # === Shutdown ===
+
+    # Shutdown
     print("Shutting down application...")
-    # TODO: Close database connections
-    # TODO: Cleanup resources
+    from src.models.database import async_engine
+    await async_engine.dispose()
 
 
 def create_app() -> FastAPI:

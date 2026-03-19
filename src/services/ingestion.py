@@ -37,3 +37,30 @@ def coerce_numerics(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
+
+
+COLUMN_MAP = {
+    "Prospect ID": "external_id",
+    "Lead Origin": "lead_origin",
+    "Lead Source": "lead_source",
+    "Do Not Email": "do_not_email",
+    "Do Not Call": "do_not_call",
+    "Converted": "converted",
+    "TotalVisits": "total_visits",
+    "Total Time Spent on Website": "total_time_spent",
+    "Page Views Per Visit": "page_views_per_visit",
+    "Last Activity": "last_activity",
+    "Country": "country",
+    "Specialization": "specialization",
+    "What is your current occupation": "current_occupation",
+    "City": "city",
+    "Tags": "tags",
+}
+
+
+def rename_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Rename CSV columns to DB column names and drop unmapped columns."""
+    df = df.copy()
+    mapped = {k: v for k, v in COLUMN_MAP.items() if k in df.columns}
+    df = df.rename(columns=mapped)
+    return df[list(mapped.values())]

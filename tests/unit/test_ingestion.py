@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from src.services.ingestion import replace_placeholders, convert_booleans, coerce_numerics
+from src.services.ingestion import replace_placeholders, convert_booleans, coerce_numerics, rename_columns
 
 
 def test_replace_placeholders_replaces_select():
@@ -75,3 +75,45 @@ def test_coerce_numerics_invalid_become_nan():
     assert pd.isna(result["TotalVisits"].iloc[0])
     assert result["TotalVisits"].iloc[1] == 5.0
     assert pd.isna(result["TotalVisits"].iloc[2])
+
+
+def test_rename_columns_maps_csv_to_db_names():
+    df = pd.DataFrame({
+        "Prospect ID": ["abc-001"],
+        "Lead Origin": ["API"],
+        "Lead Source": ["Google"],
+        "Do Not Email": [False],
+        "Do Not Call": [False],
+        "Converted": [True],
+        "TotalVisits": [5.0],
+        "Total Time Spent on Website": [300.0],
+        "Page Views Per Visit": [2.5],
+        "Last Activity": ["Email Opened"],
+        "Country": ["India"],
+        "Specialization": ["Data Science"],
+        "What is your current occupation": ["Working Professional"],
+        "City": ["Mumbai"],
+        "Tags": ["Interested"],
+    })
+    result = rename_columns(df)
+    expected_cols = {
+        "external_id", "lead_origin", "lead_source", "do_not_email",
+        "do_not_call", "converted", "total_visits", "total_time_spent",
+        "page_views_per_visit", "last_activity", "country",
+        "specialization", "current_occupation", "city", "tags",
+    }
+    assert set(result.columns) == expected_cols
+
+
+def test_rename_columns_drops_unmapped_columns():
+    df = pd.DataFrame({
+        "Prospect ID": ["abc-001"],
+        "Lead Number": [660737],
+        "How did you hear about X Education": ["Select"],
+        "Lead Origin": ["API"],
+    })
+    result = rename_columns(df)
+    assert "Lead Number" not in result.columns
+    assert "How did you hear about X Education" not in result.columns
+    assert "external_id" in result.columns
+    assert "lead_origin" in result.columns

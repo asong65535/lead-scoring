@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import AsyncGenerator
+from datetime import datetime, timezone
 
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -36,6 +37,17 @@ def make_lead_kwargs(**overrides) -> dict:
     defaults = {
         "external_id": f"test-{uuid.uuid4().hex[:8]}",
         "source_system": "kaggle",
+    }
+    defaults.update(overrides)
+    return defaults
+
+
+def make_event_kwargs(**overrides) -> dict:
+    defaults = {
+        "event_type": "page_view",
+        "event_name": "Blog Post",
+        "properties": {"url": "/blog/test", "session_id": "s-test-001"},
+        "occurred_at": datetime.now(timezone.utc),
     }
     defaults.update(overrides)
     return defaults

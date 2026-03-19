@@ -31,7 +31,7 @@ class Lead(TimestampMixin, Base):
     # Relationships (defined here, back_populates set in child models)
     predictions: Mapped[list["Prediction"]] = relationship(back_populates="lead")
     sync_logs: Mapped[list["CRMSyncLog"]] = relationship(back_populates="lead")
-    events: Mapped[list["Event"]] = relationship(back_populates="lead")
+    events: Mapped[list["Event"]] = relationship(back_populates="lead", passive_deletes=True)
 
     __table_args__ = (
         Index("ix_leads_source_system", "source_system"),

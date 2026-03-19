@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 
-from sqlalchemy import Boolean, Float, Index, String
+from sqlalchemy import Boolean, DateTime, Float, Index, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base, TimestampMixin
@@ -25,10 +26,12 @@ class Lead(TimestampMixin, Base):
     last_activity: Mapped[str | None] = mapped_column(String(100))
     tags: Mapped[str | None] = mapped_column(String(200))
     converted: Mapped[bool | None] = mapped_column(Boolean)
+    converted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Relationships (defined here, back_populates set in child models)
     predictions: Mapped[list["Prediction"]] = relationship(back_populates="lead")
     sync_logs: Mapped[list["CRMSyncLog"]] = relationship(back_populates="lead")
+    events: Mapped[list["Event"]] = relationship(back_populates="lead")
 
     __table_args__ = (
         Index("ix_leads_source_system", "source_system"),

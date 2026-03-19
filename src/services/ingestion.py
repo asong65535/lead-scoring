@@ -15,6 +15,9 @@ def replace_placeholders(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+NUMERIC_COLUMNS = ("TotalVisits", "Total Time Spent on Website", "Page Views Per Visit")
+
+
 def convert_booleans(df: pd.DataFrame) -> pd.DataFrame:
     """Convert Yes/No and 0/1 columns to boolean."""
     df = df.copy()
@@ -24,4 +27,13 @@ def convert_booleans(df: pd.DataFrame) -> pd.DataFrame:
     if "Converted" in df.columns:
         mapping = {1: True, 0: False, 1.0: True, 0.0: False}
         df["Converted"] = df["Converted"].map(mapping)
+    return df
+
+
+def coerce_numerics(df: pd.DataFrame) -> pd.DataFrame:
+    """Coerce numeric columns to float. Invalid values become NaN."""
+    df = df.copy()
+    for col in NUMERIC_COLUMNS:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
     return df

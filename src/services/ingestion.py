@@ -64,3 +64,11 @@ def rename_columns(df: pd.DataFrame) -> pd.DataFrame:
     mapped = {k: v for k, v in COLUMN_MAP.items() if k in df.columns}
     df = df.rename(columns=mapped)
     return df[list(mapped.values())]
+
+
+def validate_required_fields(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split DataFrame into valid and rejected rows based on required fields.
+    Rejects rows where external_id is missing, empty, or whitespace-only.
+    """
+    mask = df["external_id"].notna() & (df["external_id"].str.strip() != "")
+    return df[mask].copy(), df[~mask].copy()

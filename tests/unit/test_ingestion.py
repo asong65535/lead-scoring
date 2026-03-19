@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from src.services.ingestion import replace_placeholders, convert_booleans, coerce_numerics, rename_columns
+from src.services.ingestion import replace_placeholders, convert_booleans, coerce_numerics, rename_columns, validate_required_fields
 
 
 def test_replace_placeholders_replaces_select():
@@ -117,3 +117,18 @@ def test_rename_columns_drops_unmapped_columns():
     assert "How did you hear about X Education" not in result.columns
     assert "external_id" in result.columns
     assert "lead_origin" in result.columns
+
+
+def test_validate_required_fields_keeps_valid_rows():
+    df = pd.DataFrame({"external_id": ["abc-001", "abc-002"], "country": ["India", None]})
+    valid, rejected = validate_required_fields(df)
+    assert len(valid) == 2
+    assert len(rejected) == 0
+
+
+def test_validate_required_fields_rejects_missing_external_id():
+    df = pd.DataFrame({"external_id": ["abc-001", np.nan, "", None], "country": ["India", "UK", "US", "DE"]})
+    valid, rejected = validate_required_fields(df)
+    assert len(valid) == 1
+    assert valid["external_id"].iloc[0] == "abc-001"
+    assert len(rejected) == 3

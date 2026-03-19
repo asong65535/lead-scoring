@@ -13,3 +13,15 @@ def replace_placeholders(df: pd.DataFrame) -> pd.DataFrame:
             regex=True,
         )
     return df
+
+
+def convert_booleans(df: pd.DataFrame) -> pd.DataFrame:
+    """Convert Yes/No and 0/1 columns to boolean."""
+    df = df.copy()
+    for col in ("Do Not Email", "Do Not Call"):
+        if col in df.columns:
+            df[col] = df[col].map({"Yes": True, "No": False}).fillna(False)
+    if "Converted" in df.columns:
+        mapping = {1: True, 0: False, 1.0: True, 0.0: False}
+        df["Converted"] = df["Converted"].map(mapping)
+    return df

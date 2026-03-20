@@ -1,48 +1,87 @@
-"""
-Lead Scoring API - Main Application
-
-FastAPI application factory with lifespan management.
-"""
+"""Lead Scoring API — application factory and lifespan management."""
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncGenerator
 
-from fastapi import FastAPI
+import structlog
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from config.settings import get_settings
+from src.api.exceptions import (
+    FeatureComputationError,
+    LeadNotFoundError,
+    ModelNotLoadedError,
+)
+from src.api.middleware.logging import LoggingMiddleware, configure_logging
+from src.api.middleware.request_id import RequestIDMiddleware
 from src.api.routes import health
+from src.api.routes import scoring
+from src.api.routes import webhooks
+from src.api.routes import admin
+from src.ml.serialization import load_model
+from src.models.database import async_engine
+from src.models.model_registry import ModelRegistry
+
+logger = structlog.get_logger()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings = get_settings()
+    configure_logging(debug=settings.debug)
 
-    print(f"Starting {settings.app_name} v{settings.app_version}")
-    print(f"Environment: {settings.environment}")
-    print(f"Debug mode: {settings.debug}")
+    logger.info(
+        "app_starting",
+        app=settings.app_name,
+        version=settings.app_version,
+        environment=settings.environment,
+    )
 
-    # TODO: Load ML model into memory
+    # Load active model from registry
+    session_factory = async_sessionmaker(
+        bind=async_engine, class_=AsyncSession, expire_on_commit=False,
+    )
+    async with session_factory() as session:
+        result = await session.execute(
+            select(ModelRegistry).where(ModelRegistry.is_active == True)  # noqa: E712
+        )
+        active_model = result.scalar_one_or_none()
+
+    if active_model:
+        artifact_path = Path(active_model.artifact_path)
+        if artifact_path.exists():
+            app.state.model = load_model(artifact_path)
+            app.state.model_version = active_model.version
+            logger.info("model_loaded", version=active_model.version)
+        else:
+            app.state.model = None
+            app.state.model_version = None
+            logger.warning(
+                "model_artifact_missing",
+                version=active_model.version,
+                path=str(artifact_path),
+            )
+    else:
+        app.state.model = None
+        app.state.model_version = None
+        logger.warning("no_active_model_in_registry")
 
     app.state.settings = settings
-    app.state.model = None  # Will be loaded in Phase 5
-    
+
     yield
 
-    # Shutdown
-    print("Shutting down application...")
-    from src.models.database import async_engine
+    logger.info("app_shutting_down")
     await async_engine.dispose()
 
 
 def create_app() -> FastAPI:
-    """
-    Application factory.
-    
-    Creates and configures the FastAPI application.
-    """
     settings = get_settings()
-    
+
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
@@ -51,8 +90,10 @@ def create_app() -> FastAPI:
         redoc_url="/redoc" if settings.debug else None,
         lifespan=lifespan,
     )
-    
-    # Configure CORS
+
+    # Middleware (order matters — outermost first)
+    app.add_middleware(LoggingMiddleware)
+    app.add_middleware(RequestIDMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"] if settings.debug else [],
@@ -60,18 +101,46 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    
-    # Register routes
+
+    # Routers
     app.include_router(health.router, tags=["Health"])
-    
-    # Future routers (to be added in later phases):
-    # app.include_router(scoring.router, prefix="/score", tags=["Scoring"])
-    # app.include_router(webhooks.router, prefix="/webhooks", tags=["Webhooks"])
-    # app.include_router(contacts.router, prefix="/contacts", tags=["Contacts"])
-    # app.include_router(admin.router, prefix="/admin", tags=["Admin"])
-    
+    app.include_router(scoring.router, prefix="/score", tags=["Scoring"])
+    app.include_router(webhooks.router, prefix="/webhooks", tags=["Webhooks"])
+    app.include_router(admin.router, prefix="/admin", tags=["Admin"])
+
+    # Exception handlers
+    @app.exception_handler(LeadNotFoundError)
+    async def lead_not_found_handler(request: Request, exc: LeadNotFoundError):
+        return JSONResponse(
+            status_code=404,
+            content={"detail": str(exc), "lead_id": str(exc.lead_id)},
+        )
+
+    @app.exception_handler(ModelNotLoadedError)
+    async def model_not_loaded_handler(request: Request, exc: ModelNotLoadedError):
+        return JSONResponse(
+            status_code=503,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(FeatureComputationError)
+    async def feature_error_handler(request: Request, exc: FeatureComputationError):
+        request_id = getattr(request.state, "request_id", "unknown")
+        return JSONResponse(
+            status_code=500,
+            content={"detail": exc.detail, "request_id": request_id},
+        )
+
+    @app.exception_handler(Exception)
+    async def generic_error_handler(request: Request, exc: Exception):
+        request_id = getattr(request.state, "request_id", "unknown")
+        logger.error("unhandled_exception", request_id=request_id, error=str(exc), exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error", "request_id": request_id},
+        )
+
     return app
 
 
-# Create the app instance
 app = create_app()

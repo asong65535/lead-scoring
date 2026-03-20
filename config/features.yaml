@@ -1,7 +1,8 @@
 # Feature Definitions for Lead Scoring Model
-# 
+#
 # Each feature has:
 #   - name: Internal feature name
+#   - category: Feature category (recency, frequency, intensity, intent, firmographic, engagement)
 #   - type: numeric, categorical, or boolean
 #   - description: What this feature measures
 #   - default: Value to use when data is missing
@@ -10,122 +11,124 @@
 version: "1.0"
 
 features:
-  # ============================================
-  # Recency Features
-  # ============================================
   - name: days_since_last_visit
+    category: recency
     type: numeric
     description: Days since the contact's most recent website visit
     default: 365
-    
+
   - name: days_since_last_email_open
+    category: recency
     type: numeric
     description: Days since the contact last opened an email
     default: 365
-    
+
   - name: days_since_first_touch
+    category: recency
     type: numeric
     description: Days since the contact first entered the system
     default: 0
 
-  # ============================================
-  # Frequency Features
-  # ============================================
   - name: total_pageviews_7d
+    category: frequency
     type: numeric
     description: Total page views in the last 7 days
     default: 0
-    
+
   - name: total_pageviews_30d
+    category: frequency
     type: numeric
     description: Total page views in the last 30 days
     default: 0
-    
+
   - name: total_sessions
+    category: frequency
     type: numeric
     description: Total number of website sessions
     default: 0
-    
+
   - name: emails_opened_30d
+    category: frequency
     type: numeric
     description: Number of emails opened in the last 30 days
     default: 0
-    
+
   - name: emails_clicked_30d
+    category: frequency
     type: numeric
     description: Number of email links clicked in the last 30 days
     default: 0
 
-  # ============================================
-  # Intensity Features
-  # ============================================
   - name: avg_pages_per_session
+    category: intensity
     type: numeric
     description: Average number of pages viewed per session
     default: 0
-    
+
   - name: avg_session_duration_seconds
+    category: intensity
     type: numeric
     description: Average session duration in seconds
     default: 0
-    
+
   - name: pricing_page_views
+    category: intensity
     type: numeric
     description: Number of times the pricing page was viewed
     default: 0
 
-  # ============================================
-  # Intent Signal Features
-  # ============================================
   - name: viewed_pricing
+    category: intent
     type: boolean
     description: Whether the contact has ever viewed the pricing page
     default: false
-    
+
   - name: requested_demo
+    category: intent
     type: boolean
     description: Whether the contact has submitted a demo request
     default: false
-    
+
   - name: downloaded_content
+    category: intent
     type: boolean
     description: Whether the contact has downloaded gated content
     default: false
-    
+
   - name: visited_competitor_comparison
+    category: intent
     type: boolean
     description: Whether the contact viewed competitor comparison pages
     default: false
 
-  # ============================================
-  # Firmographic Features
-  # ============================================
   - name: company_size_bucket
+    category: firmographic
     type: categorical
     description: Company size category
     categories: ["unknown", "1-10", "11-50", "51-200", "201-1000", "1000+"]
     default: "unknown"
-    
+
   - name: industry_match_icp
+    category: firmographic
     type: boolean
     description: Whether the company's industry matches ideal customer profile
     default: false
-    
+
   - name: job_title_seniority
+    category: firmographic
     type: categorical
     description: Seniority level based on job title
     categories: ["unknown", "individual_contributor", "manager", "director", "vp", "c_level"]
     default: "unknown"
 
-  # ============================================
-  # Engagement Trend Features
-  # ============================================
   - name: engagement_velocity_7d
+    category: engagement
     type: numeric
     description: Rate of engagement change over the last 7 days (positive = increasing)
     default: 0
-    
+
   - name: is_engagement_increasing
+    category: engagement
     type: boolean
     description: Whether engagement is trending upward
     default: false

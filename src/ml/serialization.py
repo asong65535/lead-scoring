@@ -70,7 +70,7 @@ async def get_existing_versions(engine: AsyncEngine) -> list[str]:
 async def register_model(
     engine: AsyncEngine,
     version: str,
-    artifact_path: str,
+    artifact_path: Path | str,
     metrics: dict,
     hyperparameters: dict,
     feature_columns: list[str],
@@ -89,7 +89,7 @@ async def register_model(
                 insert(ModelRegistry.__table__)
                 .values(
                     version=version,
-                    artifact_path=artifact_path,
+                    artifact_path=str(artifact_path),
                     metrics=metrics,
                     hyperparameters=hyperparameters,
                     feature_columns=feature_columns,

@@ -77,6 +77,29 @@ class TestComputeAsOfDate:
         assert result == created_at + timedelta(days=90)
 
 
+class TestTimeSplit:
+    def test_time_based_split_oldest_to_train(self):
+        """Verify train gets oldest rows, test gets newest rows by as_of_date."""
+        feature_dicts = [
+            {"lead_id": f"id{i}", "computed_at": NOW, **{n: i for n in MVP_FEATURE_NAMES}, **{n: "x" for n in FIRMOGRAPHIC_PLACEHOLDERS}}
+            for i in range(10)
+        ]
+        # as_of_dates are deliberately out of order to test sorting
+        dates = [NOW - timedelta(days=d) for d in [5, 9, 1, 8, 3, 7, 2, 6, 4, 0]]
+        labels = [True] * 5 + [False] * 5
+
+        df = prepare_dataframe(feature_dicts, labels, dates)
+        df = df.sort_values("as_of_date").reset_index(drop=True)
+        split_idx = int(len(df) * 0.8)
+        train_df = df.iloc[:split_idx]
+        test_df = df.iloc[split_idx:]
+
+        assert len(train_df) == 8
+        assert len(test_df) == 2
+        # Train's max as_of_date should be <= test's min as_of_date
+        assert train_df["as_of_date"].max() <= test_df["as_of_date"].min()
+
+
 class TestPrepareDataframe:
     def test_drops_metadata_and_firmographic_columns(self):
         """prepare_dataframe should drop lead_id, computed_at, and firmographic cols."""

@@ -120,3 +120,19 @@ def test_default_hyperparameters_are_sensible():
     assert DEFAULT_HYPERPARAMETERS["n_estimators"] == 200
     assert DEFAULT_HYPERPARAMETERS["max_depth"] == 6
     assert DEFAULT_HYPERPARAMETERS["random_state"] == 42
+
+
+def test_scale_pos_weight_computed_correctly(synthetic_data):
+    train_df, test_df = synthetic_data
+    X_train = train_df[MVP_FEATURE_NAMES]
+    y_train = train_df["converted"]
+    X_test = test_df[MVP_FEATURE_NAMES]
+    y_test = test_df["converted"]
+    pipeline = build_preprocessing_pipeline()
+    result = train_model(X_train, y_train, X_test, y_test, pipeline)
+
+    n_neg = int((y_train == False).sum())
+    n_pos = int((y_train == True).sum())
+    expected_weight = n_neg / n_pos
+
+    assert result.hyperparameters["scale_pos_weight"] == pytest.approx(expected_weight)

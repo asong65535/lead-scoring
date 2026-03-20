@@ -66,7 +66,7 @@ async def main(tune: bool = False, set_active: bool = False) -> None:
 
         # Register in DB
         model_id = await register_model(
-            engine, version, str(artifact_path),
+            engine, version, artifact_path,
             result.metrics, result.hyperparameters,
             result.feature_columns, set_active=set_active,
         )

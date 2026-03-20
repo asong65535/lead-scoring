@@ -69,6 +69,9 @@ def train_model(
     hyperparameters: dict | None = None,
 ) -> TrainResult:
     """Train XGBoost and evaluate on holdout set."""
+    if y_train.nunique() < 2:
+        raise ValueError("Training labels must contain both positive and negative examples")
+
     params = {**DEFAULT_HYPERPARAMETERS, **(hyperparameters or {})}
 
     # Compute class imbalance weight

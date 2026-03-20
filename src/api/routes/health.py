@@ -7,8 +7,14 @@ Provides endpoints for monitoring application health and readiness.
 from datetime import datetime, timezone
 from typing import Any
 
+import structlog
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
+from sqlalchemy import text
+
+from src.models.database import async_engine
+
+logger = structlog.get_logger()
 
 
 router = APIRouter()
@@ -94,18 +100,23 @@ async def readiness_check(request: Request) -> ReadinessResponse:
 
 async def _check_database() -> dict[str, Any]:
     """Check database connectivity and return details."""
-    # TODO: Implement actual database check in Phase 2
-    # For now, return a placeholder
-    return {
-        "healthy": True,
-        "message": "Database check not yet implemented",
-    }
+    try:
+        async with async_engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return {"healthy": True}
+    except Exception as exc:
+        logger.error("database_health_check_failed", error=str(exc))
+        return {"healthy": False, "error": str(exc)}
 
 
 async def _check_database_connection() -> bool:
     """Check if database is connected (simple bool for readiness)."""
-    # TODO: Implement in Phase 2
-    return True
+    try:
+        async with async_engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        return False
 
 
 def _check_model(request: Request) -> dict[str, Any]:
@@ -114,9 +125,9 @@ def _check_model(request: Request) -> dict[str, Any]:
     
     if model is None:
         return {
-            "healthy": True,  # Model not being loaded yet is okay
+            "healthy": False,
             "loaded": False,
-            "message": "Model not yet loaded (Phase 5)",
+            "message": "No model loaded",
         }
     
     return {
@@ -128,6 +139,4 @@ def _check_model(request: Request) -> dict[str, Any]:
 
 def _check_model_loaded(request: Request) -> bool:
     """Check if model is loaded (simple bool for readiness)."""
-    # For now, return True since model loading is Phase 5
-    # Later, this should return False if model failed to load
-    return True
+    return getattr(request.app.state, "model", None) is not None

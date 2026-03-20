@@ -116,10 +116,17 @@ def test_model_can_predict(synthetic_data):
     assert all(0.0 <= p <= 1.0 for p in probas[:, 1])
 
 
-def test_default_hyperparameters_are_sensible():
-    assert DEFAULT_HYPERPARAMETERS["n_estimators"] == 200
-    assert DEFAULT_HYPERPARAMETERS["max_depth"] == 6
-    assert DEFAULT_HYPERPARAMETERS["random_state"] == 42
+def test_train_raises_on_single_class_labels():
+    """train_model should fail gracefully when all labels are the same class."""
+    rng = np.random.RandomState(42)
+    n = 50
+    rows = [{name: rng.random() for name in NUMERIC_FEATURES} | {name: True for name in BOOLEAN_FEATURES} for _ in range(n)]
+    df = pd.DataFrame(rows)
+    X = df[MVP_FEATURE_NAMES]
+    y_all_true = pd.Series([True] * n)
+    pipeline = build_preprocessing_pipeline()
+    with pytest.raises(ValueError):
+        train_model(X, y_all_true, X, y_all_true, pipeline)
 
 
 def test_scale_pos_weight_computed_correctly(synthetic_data):

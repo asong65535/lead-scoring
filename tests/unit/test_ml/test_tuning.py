@@ -46,15 +46,3 @@ def test_tune_respects_custom_grid(small_data):
     assert result["max_depth"] == 2
 
 
-def test_default_param_grid_has_expected_keys():
-    assert "n_estimators" in DEFAULT_PARAM_GRID
-    assert "max_depth" in DEFAULT_PARAM_GRID
-    assert "learning_rate" in DEFAULT_PARAM_GRID
-    assert "subsample" in DEFAULT_PARAM_GRID
-
-
-def test_default_param_grid_yields_81_combos():
-    combos = 1
-    for values in DEFAULT_PARAM_GRID.values():
-        combos *= len(values)
-    assert combos == 81

@@ -5,7 +5,9 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 import pytest
 
-from src.ml.dataset import compute_as_of_date, prepare_dataframe
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from src.ml.dataset import build_training_dataset, compute_as_of_date, prepare_dataframe
 from src.ml.preprocessing import MVP_FEATURE_NAMES, FIRMOGRAPHIC_PLACEHOLDERS
 
 
@@ -136,3 +138,25 @@ class TestPrepareDataframe:
         df = prepare_dataframe(feature_dicts, labels, as_of_dates)
 
         assert list(df["converted"]) == [True, False]
+
+
+class TestBuildTrainingDatasetGuards:
+    async def test_raises_on_no_labeled_leads(self):
+        """build_training_dataset should raise ValueError when query returns no labeled leads."""
+        # Patch the session to return empty results for the leads query.
+        # session_factory() → async ctx manager → session, session.execute() → result
+        mock_result = MagicMock()
+        mock_result.all.return_value = []
+
+        mock_session = MagicMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        mock_factory = MagicMock(return_value=mock_session)
+
+        fake_engine = AsyncMock()
+
+        with patch("src.ml.dataset.async_sessionmaker", return_value=mock_factory):
+            with pytest.raises(ValueError, match="No labeled leads"):
+                await build_training_dataset(fake_engine)

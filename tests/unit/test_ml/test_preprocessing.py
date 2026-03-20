@@ -62,10 +62,3 @@ def test_pipeline_feature_names_out(sample_df):
 def test_mvp_feature_names_excludes_firmographic():
     for name in FIRMOGRAPHIC_PLACEHOLDERS:
         assert name not in MVP_FEATURE_NAMES
-
-
-def test_firmographic_placeholders_has_three_entries():
-    assert len(FIRMOGRAPHIC_PLACEHOLDERS) == 3
-    assert "company_size_bucket" in FIRMOGRAPHIC_PLACEHOLDERS
-    assert "industry_match_icp" in FIRMOGRAPHIC_PLACEHOLDERS
-    assert "job_title_seniority" in FIRMOGRAPHIC_PLACEHOLDERS

@@ -131,3 +131,59 @@ async def test_saved_model_predicts_on_feature_dicts(async_test_engine, tmp_path
 
     assert probas.shape == (1, 2)
     assert 0.0 <= probas[0, 1] <= 1.0
+
+
+async def test_register_model_deactivates_previous(async_test_engine, tmp_path):
+    """When set_active=True, previously active models should be deactivated."""
+    await _seed_leads(async_test_engine, n_converted=15, n_not_converted=25)
+    await generate_events(engine=async_test_engine, seed=77)
+
+    train_df, test_df = await build_training_dataset(async_test_engine, test_fraction=0.2)
+    pipeline = build_preprocessing_pipeline()
+    result = train_model(
+        train_df[MVP_FEATURE_NAMES], train_df["converted"],
+        test_df[MVP_FEATURE_NAMES], test_df["converted"],
+        pipeline,
+    )
+
+    # Register first model as active
+    v1 = "v90.0"
+    _created_model_versions.append(v1)
+    path1 = save_model(
+        result.model, v1,
+        result.metrics, result.hyperparameters,
+        result.feature_columns, base_dir=tmp_path,
+    )
+    id1 = await register_model(
+        async_test_engine, v1, str(path1),
+        result.metrics, result.hyperparameters,
+        result.feature_columns, set_active=True,
+    )
+
+    # Register second model as active
+    v2 = "v90.1"
+    _created_model_versions.append(v2)
+    path2 = save_model(
+        result.model, v2,
+        result.metrics, result.hyperparameters,
+        result.feature_columns, base_dir=tmp_path,
+    )
+    id2 = await register_model(
+        async_test_engine, v2, str(path2),
+        result.metrics, result.hyperparameters,
+        result.feature_columns, set_active=True,
+    )
+
+    # Verify: v1 should now be inactive, v2 active
+    async with async_test_engine.connect() as conn:
+        row1 = await conn.execute(
+            select(ModelRegistry.__table__).where(ModelRegistry.__table__.c.version == v1)
+        )
+        record1 = row1.one()
+        row2 = await conn.execute(
+            select(ModelRegistry.__table__).where(ModelRegistry.__table__.c.version == v2)
+        )
+        record2 = row2.one()
+
+    assert record1.is_active is False, "First model should be deactivated after second is registered as active"
+    assert record2.is_active is True

@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
+import json
+
 import joblib
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
@@ -26,10 +28,25 @@ def save_model(
     feature_columns: list[str],
     base_dir: Path = Path("models"),
 ) -> Path:
-    """Save model pipeline to disk via joblib."""
+    """Save model pipeline and metadata to disk.
+
+    Writes two files:
+    - {version}.joblib — the fitted sklearn Pipeline
+    - {version}.meta.json — metrics, hyperparameters, feature columns
+    """
     base_dir.mkdir(parents=True, exist_ok=True)
     path = base_dir / f"{version}.joblib"
     joblib.dump(model, path)
+
+    meta_path = base_dir / f"{version}.meta.json"
+    meta_path.write_text(json.dumps({
+        "version": version,
+        "metrics": metrics,
+        "hyperparameters": hyperparameters,
+        "feature_columns": feature_columns,
+        "trained_at": datetime.now(timezone.utc).isoformat(),
+    }, indent=2))
+
     return path
 
 

@@ -1,5 +1,7 @@
 """Unit tests for model serialization (save/load only — no DB)."""
 
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -40,6 +42,22 @@ def test_save_creates_joblib_file(trained_result, tmp_path):
     assert path.exists()
     assert path.suffix == ".joblib"
     assert "v1.0" in path.name
+
+
+def test_save_creates_metadata_sidecar(trained_result, tmp_path):
+    save_model(
+        trained_result.model, "v1.0",
+        trained_result.metrics, trained_result.hyperparameters,
+        trained_result.feature_columns, base_dir=tmp_path,
+    )
+    meta_path = tmp_path / "v1.0.meta.json"
+    assert meta_path.exists()
+    meta = json.loads(meta_path.read_text())
+    assert meta["version"] == "v1.0"
+    assert meta["metrics"] == trained_result.metrics
+    assert meta["hyperparameters"] == trained_result.hyperparameters
+    assert meta["feature_columns"] == trained_result.feature_columns
+    assert "trained_at" in meta
 
 
 def test_load_returns_pipeline(trained_result, tmp_path):

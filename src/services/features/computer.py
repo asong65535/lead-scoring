@@ -52,6 +52,8 @@ class FeatureComputer:
             )
             lead = result.scalar_one()
 
+        # lead.events is safe post-session: selectinload populates it eagerly,
+        # and expire_on_commit=False prevents expiration on close.
         return self._compute_for_lead(lead, lead.events, as_of_date)
 
     async def compute_batch(

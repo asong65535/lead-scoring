@@ -1,8 +1,6 @@
 """Unit tests for Event model schema contracts."""
 
-import uuid
-
-from sqlalchemy import CheckConstraint
+from sqlalchemy import CheckConstraint, DateTime
 from sqlalchemy.dialects.postgresql import JSONB
 
 from src.models.event import Event
@@ -82,3 +80,5 @@ def test_lead_has_relationship_to_events():
 def test_lead_has_converted_at_column():
     col = Lead.__table__.c.converted_at
     assert col.nullable is True
+    assert isinstance(col.type, DateTime)
+    assert col.type.timezone is True

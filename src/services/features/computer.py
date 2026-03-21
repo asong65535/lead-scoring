@@ -1,5 +1,6 @@
 """Feature computation orchestrator."""
 
+import structlog
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
@@ -14,6 +15,8 @@ from src.models.lead import Lead
 from src.services.features.registry import registry
 from src.services.features.definitions import *  # noqa: F401,F403 — trigger registrations
 from src.services.features.validation import validate_features
+
+logger = structlog.get_logger()
 
 
 class FeatureComputer:
@@ -38,7 +41,16 @@ class FeatureComputer:
         raw = {}
         for name in self._registry.computed_features():
             fn = self._registry.get_function(name)
-            raw[name] = fn(lead, events_by_type, as_of_date)
+            try:
+                raw[name] = fn(lead, events_by_type, as_of_date)
+            except Exception as exc:
+                logger.warning(
+                    "feature_computation_failed",
+                    lead_id=str(lead.id),
+                    feature=name,
+                    error=str(exc),
+                )
+                # Leave key absent — validate_features will apply the default
 
         validated = validate_features(raw, self._registry, lead_id=str(lead.id))
         validated["lead_id"] = lead.id

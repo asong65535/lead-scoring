@@ -2,7 +2,7 @@
 
 Builds a sklearn ColumnTransformer that handles 17 MVP features:
 - 12 numeric features → pass-through (XGBoost handles natively)
-- 5 boolean features → cast to 0/1 int
+- 5 boolean features → pass-through (XGBoost handles natively)
 
 Firmographic features (company_size_bucket, industry_match_icp, job_title_seniority)
 are excluded from MVP training — they always return YAML defaults. They rejoin
@@ -11,7 +11,6 @@ when CRM data populates them (Phase 7+).
 
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import FunctionTransformer
 
 FIRMOGRAPHIC_PLACEHOLDERS = frozenset({
     "company_size_bucket",
@@ -34,16 +33,12 @@ BOOLEAN_FEATURES = [
 MVP_FEATURE_NAMES = NUMERIC_FEATURES + BOOLEAN_FEATURES
 
 
-def _bool_to_int(X):
-    return X.astype(int)
-
-
 def build_preprocessing_pipeline() -> Pipeline:
     """Build sklearn Pipeline for 17 MVP features."""
     transformer = ColumnTransformer(
         transformers=[
             ("numeric", "passthrough", NUMERIC_FEATURES),
-            ("boolean", FunctionTransformer(_bool_to_int, feature_names_out="one-to-one"), BOOLEAN_FEATURES),
+            ("boolean", "passthrough", BOOLEAN_FEATURES),
         ],
         verbose_feature_names_out=False,
     )

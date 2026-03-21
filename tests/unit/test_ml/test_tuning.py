@@ -31,7 +31,7 @@ def test_tune_returns_dict(small_data):
     X, y = small_data
     pipeline = build_preprocessing_pipeline()
     tiny_grid = {"n_estimators": [10], "max_depth": [3]}
-    result = tune_hyperparameters(X, y, pipeline, param_grid=tiny_grid, cv_folds=2)
+    result = tune_hyperparameters(X, y, pipeline, param_grid=tiny_grid, cv_folds=2, n_iter=1)
     assert isinstance(result, dict)
     assert "n_estimators" in result
     assert "max_depth" in result
@@ -41,8 +41,12 @@ def test_tune_respects_custom_grid(small_data):
     X, y = small_data
     pipeline = build_preprocessing_pipeline()
     tiny_grid = {"n_estimators": [10, 20], "max_depth": [2]}
-    result = tune_hyperparameters(X, y, pipeline, param_grid=tiny_grid, cv_folds=2)
+    result = tune_hyperparameters(X, y, pipeline, param_grid=tiny_grid, cv_folds=2, n_iter=2)
     assert result["n_estimators"] in [10, 20]
     assert result["max_depth"] == 2
+
+
+def test_default_param_grid_has_no_subsample():
+    assert "subsample" not in DEFAULT_PARAM_GRID
 
 

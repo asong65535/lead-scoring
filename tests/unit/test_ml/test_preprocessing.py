@@ -41,11 +41,11 @@ def test_numeric_features_pass_through(sample_df):
     assert all(result[1, :12] == 1.0)
 
 
-def test_boolean_features_cast_to_int(sample_df):
+def test_boolean_features_pass_through(sample_df):
     pipeline = build_preprocessing_pipeline()
     result = pipeline.fit_transform(sample_df)
-    assert all(result[0, 12:] == 0)
-    assert all(result[1, 12:] == 1)
+    assert all(result[0, 12:] == False)
+    assert all(result[1, 12:] == True)
 
 
 def test_pipeline_feature_names_out(sample_df):

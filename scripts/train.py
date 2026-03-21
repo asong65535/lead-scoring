@@ -47,8 +47,6 @@ async def main(tune: bool = False, set_active: bool = False) -> None:
             print("\nTuning hyperparameters...")
             hyperparameters = tune_hyperparameters(X_train, y_train, pipeline)
             print(f"  Best params: {hyperparameters}")
-            # Rebuild pipeline since tuning consumed it
-            pipeline = build_preprocessing_pipeline()
 
         print("\nTraining model...")
         result = train_model(X_train, y_train, X_test, y_test, pipeline, hyperparameters)

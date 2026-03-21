@@ -67,17 +67,27 @@ async def build_training_dataset(
     now = datetime.now(timezone.utc)
     session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
-    # Query leads with known outcomes
+    # Query leads with known outcomes and their latest event date in one query
     async with session_factory() as session:
+        latest_event_subq = (
+            select(
+                Event.lead_id,
+                func.max(Event.occurred_at).label("latest_event_at"),
+            )
+            .group_by(Event.lead_id)
+            .subquery()
+        )
+
         result = await session.execute(
             select(
                 Lead.id,
                 Lead.converted,
                 Lead.converted_at,
                 Lead.created_at,
-            ).where(
-                Lead.converted.is_not(None),
+                latest_event_subq.c.latest_event_at,
             )
+            .outerjoin(latest_event_subq, Lead.id == latest_event_subq.c.lead_id)
+            .where(Lead.converted.is_not(None))
         )
         lead_rows = result.all()
 
@@ -93,15 +103,6 @@ async def build_training_dataset(
 
     lead_ids = [r.id for r in valid_leads]
 
-    # Get latest event date per lead for non-converted as_of_date calc
-    async with session_factory() as session:
-        result = await session.execute(
-            select(Event.lead_id, func.max(Event.occurred_at))
-            .where(Event.lead_id.in_(lead_ids))
-            .group_by(Event.lead_id)
-        )
-        latest_events = dict(result.all())
-
     # Compute as_of_dates
     as_of_dates = {}
     for row in valid_leads:
@@ -109,7 +110,7 @@ async def build_training_dataset(
             converted=row.converted,
             converted_at=row.converted_at,
             created_at=row.created_at,
-            latest_event_at=latest_events.get(row.id),
+            latest_event_at=row.latest_event_at,
             now=now,
         )
 

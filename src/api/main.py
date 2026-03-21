@@ -1,5 +1,6 @@
 """Lead Scoring API — application factory and lifespan management."""
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
@@ -56,9 +57,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if active_model:
         artifact_path = Path(active_model.artifact_path)
         if artifact_path.exists():
-            app.state.model = load_model(artifact_path)
-            app.state.model_version = active_model.version
-            logger.info("model_loaded", version=active_model.version)
+            try:
+                app.state.model = load_model(artifact_path)
+                app.state.model_version = active_model.version
+                logger.info("model_loaded", version=active_model.version)
+            except Exception as exc:
+                app.state.model = None
+                app.state.model_version = None
+                logger.error("model_load_failed", version=active_model.version, error=str(exc))
         else:
             app.state.model = None
             app.state.model_version = None
@@ -72,6 +78,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.model_version = None
         logger.warning("no_active_model_in_registry")
 
+    app.state.model_lock = asyncio.Lock()
     app.state.settings = settings
 
     yield

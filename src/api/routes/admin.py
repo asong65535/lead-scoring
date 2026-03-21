@@ -56,9 +56,31 @@ async def reload_model(
             detail=f"Model artifact not found: {row.artifact_path}",
         )
 
-    model = load_model(artifact_path)
-    request.app.state.model = model
-    request.app.state.model_version = row.version
+    lock = request.app.state.model_lock
+    async with lock:
+        try:
+            model = load_model(artifact_path)
+        except Exception as exc:
+            logger.error("model_reload_failed", version=row.version, error=str(exc))
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to load model: {type(exc).__name__}",
+            )
+
+        # Validate model has required interface
+        if not hasattr(model, "predict_proba"):
+            raise HTTPException(
+                status_code=500,
+                detail="Loaded model missing predict_proba method",
+            )
+        if not hasattr(model, "named_steps") or "classifier" not in model.named_steps:
+            raise HTTPException(
+                status_code=500,
+                detail="Loaded model missing expected pipeline structure",
+            )
+
+        request.app.state.model = model
+        request.app.state.model_version = row.version
 
     logger.info("model_reloaded", version=row.version, artifact_path=str(artifact_path))
 

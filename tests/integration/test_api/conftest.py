@@ -148,7 +148,20 @@ def api_client(trained_model_path, seeded_leads):
     health_mod.async_engine = fresh_engine
     deps_mod.async_engine = fresh_engine
 
-    app = create_app()
+    # Disable auth for integration tests — auth middleware has its own unit tests.
+    # Clear the lru_cache so create_app() picks up the patched value.
+    get_settings.cache_clear()
+    import os
+    orig_auth = os.environ.get("AUTH_ENABLED")
+    os.environ["AUTH_ENABLED"] = "false"
+    try:
+        app = create_app()
+    finally:
+        get_settings.cache_clear()
+        if orig_auth is None:
+            os.environ.pop("AUTH_ENABLED", None)
+        else:
+            os.environ["AUTH_ENABLED"] = orig_auth
 
     # Inject already-loaded model so lifespan doesn't try to re-query the DB
     model = load_model(trained_model_path)

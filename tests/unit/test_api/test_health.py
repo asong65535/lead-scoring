@@ -1,6 +1,6 @@
 """Tests for health endpoints with real checks wired."""
 
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient

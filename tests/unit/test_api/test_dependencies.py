@@ -1,6 +1,6 @@
 """Tests for FastAPI dependency functions."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import Request

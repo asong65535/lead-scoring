@@ -1,8 +1,7 @@
 """Tests for structured logging middleware."""
 
-import json
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.middleware.logging import LoggingMiddleware, configure_logging

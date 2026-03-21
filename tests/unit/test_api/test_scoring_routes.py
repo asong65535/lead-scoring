@@ -4,14 +4,12 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.dependencies import get_scoring_service
 from src.api.exceptions import LeadNotFoundError, ModelNotLoadedError
 from src.api.routes.scoring import router
-from src.api.schemas import ScoreResponse
 from src.services.scoring import ScoreResult
 
 
@@ -19,7 +17,7 @@ def _make_app(mock_service):
     app = FastAPI()
     app.include_router(router, prefix="/score")
 
-    from src.api.exceptions import LeadNotFoundError, ModelNotLoadedError
+    from src.api.exceptions import LeadNotFoundError
     from fastapi.responses import JSONResponse
 
     @app.exception_handler(LeadNotFoundError)

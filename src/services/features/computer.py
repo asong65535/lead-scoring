@@ -66,7 +66,7 @@ class FeatureComputer:
         self,
         lead_ids: list[UUID],
         as_of_dates: dict[UUID, datetime] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> dict[UUID, dict[str, Any]]:
         default_as_of = datetime.now(timezone.utc)
 
         async with self._session_factory() as session:
@@ -77,9 +77,9 @@ class FeatureComputer:
             )
             leads = result.scalars().all()
 
-        results = []
+        results = {}
         for lead in leads:
             as_of = (as_of_dates or {}).get(lead.id, default_as_of)
-            results.append(self._compute_for_lead(lead, lead.events, as_of))
+            results[lead.id] = self._compute_for_lead(lead, lead.events, as_of)
 
         return results

@@ -4,6 +4,8 @@ Receives a fitted sklearn Pipeline (model), a FeatureComputer (engine-scoped),
 and a per-request AsyncSession (for writing Prediction rows).
 """
 
+import structlog
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -18,6 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.exceptions import LeadNotFoundError
 from src.models.prediction import Prediction
 from src.services.features.computer import FeatureComputer
+
+logger = structlog.get_logger()
 
 
 @dataclass
@@ -127,52 +131,62 @@ class ScoringService:
 
     async def score_leads(
         self, lead_ids: list[UUID],
-    ) -> tuple[list[ScoreResult], list[UUID]]:
-        feature_dicts = await self._feature_computer.compute_batch(lead_ids)
+    ) -> tuple[list[ScoreResult], list[UUID], list[tuple[UUID, str]]]:
+        """Score multiple leads. Returns (results, missing_ids, errors).
 
-        found_ids = {d["lead_id"] for d in feature_dicts}
+        Errors contains (lead_id, error_message) for leads that failed during scoring.
+        Missing_ids contains lead_ids not found in the database.
+        """
+        features_by_id = await self._feature_computer.compute_batch(lead_ids)
+
+        found_ids = set(features_by_id.keys())
         missing_ids = [lid for lid in lead_ids if lid not in found_ids]
 
-        if not feature_dicts:
-            return [], missing_ids
+        if not features_by_id:
+            return [], missing_ids, []
 
         feature_names, importances = self._get_feature_meta()
 
-        rows = [{k: d[k] for k in feature_names} for d in feature_dicts]
-        df = pd.DataFrame(rows)
-        probas = self._model.predict_proba(df)[:, 1]
-
         results = []
+        errors = []
         scored_at = datetime.now(timezone.utc)
 
-        for i, feat_dict in enumerate(feature_dicts):
-            lid = feat_dict["lead_id"]
-            proba = float(probas[i])
-            bucket = self.assign_bucket(
-                proba, self._bucket_a, self._bucket_b, self._bucket_c,
-            )
-            factors = self.top_factors(feature_names, importances, feat_dict)
-            snapshot = {k: feat_dict[k] for k in feature_names}
+        for lid, feat_dict in features_by_id.items():
+            try:
+                row = {k: feat_dict[k] for k in feature_names}
+                df = pd.DataFrame([row])
+                proba = float(self._model.predict_proba(df)[0, 1])
 
-            pred = Prediction(
-                lead_id=lid,
-                score=proba,
-                bucket=bucket,
-                model_version=self._model_version,
-                feature_snapshot=snapshot,
-                top_factors=factors,
-                scored_at=scored_at,
-            )
-            self._session.add(pred)
+                bucket = self.assign_bucket(
+                    proba, self._bucket_a, self._bucket_b, self._bucket_c,
+                )
+                factors = self.top_factors(feature_names, importances, feat_dict)
+                snapshot = {k: feat_dict[k] for k in feature_names}
 
-            results.append(ScoreResult(
-                lead_id=lid,
-                score=proba,
-                bucket=bucket,
-                model_version=self._model_version,
-                top_factors=factors,
-                scored_at=scored_at,
-            ))
+                pred = Prediction(
+                    lead_id=lid,
+                    score=proba,
+                    bucket=bucket,
+                    model_version=self._model_version,
+                    feature_snapshot=snapshot,
+                    top_factors=factors,
+                    scored_at=scored_at,
+                )
+                self._session.add(pred)
 
-        await self._session.commit()
-        return results, missing_ids
+                results.append(ScoreResult(
+                    lead_id=lid,
+                    score=proba,
+                    bucket=bucket,
+                    model_version=self._model_version,
+                    top_factors=factors,
+                    scored_at=scored_at,
+                ))
+            except Exception as exc:
+                logger.error("batch_score_lead_failed", lead_id=str(lid), error=str(exc))
+                errors.append((lid, str(exc)))
+
+        if results:
+            await self._session.commit()
+
+        return results, missing_ids, errors

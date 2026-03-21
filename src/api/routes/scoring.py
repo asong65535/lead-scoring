@@ -34,10 +34,13 @@ async def score_batch(
     body: BatchScoreRequest,
     service: ScoringService = Depends(get_scoring_service),
 ) -> BatchScoreResponse:
-    results, missing_ids = await service.score_leads(body.lead_ids)
+    results, missing_ids, errors = await service.score_leads(body.lead_ids)
     return BatchScoreResponse(
         results=[_to_response(r) for r in results],
-        errors=[ScoreError(lead_id=mid, error="Lead not found") for mid in missing_ids],
+        errors=[
+            *[ScoreError(lead_id=mid, error="Lead not found") for mid in missing_ids],
+            *[ScoreError(lead_id=lid, error=msg) for lid, msg in errors],
+        ],
     )
 
 

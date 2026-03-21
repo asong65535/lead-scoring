@@ -115,12 +115,19 @@ async def build_training_dataset(
 
     # Compute features via FeatureComputer
     computer = FeatureComputer(engine=engine)
-    feature_dicts = await computer.compute_batch(lead_ids, as_of_dates=as_of_dates)
+    features_by_id = await computer.compute_batch(lead_ids, as_of_dates=as_of_dates)
 
     # Build lookup for labels
     label_by_id = {r.id: r.converted for r in valid_leads}
-    aod_list = [as_of_dates[fd["lead_id"]] for fd in feature_dicts]
-    labels = [label_by_id[fd["lead_id"]] for fd in feature_dicts]
+
+    # Align features, labels, and as_of_dates by lead_id
+    feature_dicts = []
+    labels = []
+    aod_list = []
+    for lid, feat in features_by_id.items():
+        feature_dicts.append(feat)
+        labels.append(label_by_id[lid])
+        aod_list.append(as_of_dates[lid])
 
     df = prepare_dataframe(feature_dicts, labels, aod_list)
 

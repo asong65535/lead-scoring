@@ -121,9 +121,10 @@ async def test_compute_batch(async_test_engine, computer):
     results = await computer.compute_batch([lead1_id, lead2_id], as_of_dates=as_of_dates)
 
     assert len(results) == 2
-    by_lead = {r["lead_id"]: r for r in results}
-    assert by_lead[lead1_id]["days_since_last_visit"] == 1
-    assert by_lead[lead2_id]["days_since_last_visit"] == 365
+    assert lead1_id in results
+    assert lead2_id in results
+    assert results[lead1_id]["days_since_last_visit"] == 1
+    assert results[lead2_id]["days_since_last_visit"] == 365
 
 
 async def test_end_to_end_with_generated_events(async_test_engine, computer):

@@ -75,6 +75,7 @@ class TestScoreBatch:
         svc.score_leads.return_value = (
             [_make_score_result(id1), _make_score_result(id2)],
             [id_missing],
+            [],  # no scoring errors
         )
 
         client = TestClient(_make_app(svc))

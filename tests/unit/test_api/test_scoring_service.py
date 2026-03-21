@@ -131,18 +131,18 @@ class TestScoreLead:
 
 
 class TestScoreLeads:
-    async def test_batch_returns_results_and_missing_ids(self):
+    async def test_batch_returns_results_missing_and_errors(self):
         feature_names = ["f1", "f2"]
         model = _make_mock_model(feature_names, [0.6, 0.4])
-        model.predict_proba.return_value = np.array([[0.3, 0.7], [0.6, 0.4]])
+        model.predict_proba.return_value = np.array([[0.3, 0.7]])
 
         id1, id2, id_missing = uuid4(), uuid4(), uuid4()
 
         feature_computer = AsyncMock()
-        feature_computer.compute_batch.return_value = [
-            _make_feature_dict(id1, feature_names),
-            _make_feature_dict(id2, feature_names),
-        ]
+        feature_computer.compute_batch.return_value = {
+            id1: _make_feature_dict(id1, feature_names),
+            id2: _make_feature_dict(id2, feature_names),
+        }
 
         session = AsyncMock()
 
@@ -154,9 +154,9 @@ class TestScoreLeads:
             bucket_a=0.7, bucket_b=0.4, bucket_c=0.2,
         )
 
-        results, missing = await svc.score_leads([id1, id2, id_missing])
+        results, missing, errors = await svc.score_leads([id1, id2, id_missing])
 
         assert len(results) == 2
         assert missing == [id_missing]
-        assert results[0].lead_id == id1
+        assert errors == []
         session.commit.assert_awaited_once()

@@ -6,7 +6,6 @@ from typing import AsyncGenerator
 
 import structlog
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -17,7 +16,9 @@ from src.api.exceptions import (
     LeadNotFoundError,
     ModelNotLoadedError,
 )
+from src.api.middleware.auth import AuthMiddleware
 from src.api.middleware.logging import LoggingMiddleware, configure_logging
+from src.api.middleware.rate_limit import RateLimitMiddleware
 from src.api.middleware.request_id import RequestIDMiddleware
 from src.api.routes import health
 from src.api.routes import scoring
@@ -91,16 +92,18 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Middleware (order matters — outermost first)
+    # Middleware (order matters — outermost first in execution, last added = outermost)
     app.add_middleware(LoggingMiddleware)
     app.add_middleware(RequestIDMiddleware)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"] if settings.debug else [],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+    app.add_middleware(RateLimitMiddleware,
+        max_requests=settings.rate_limit_requests,
+        window_seconds=settings.rate_limit_window_seconds,
     )
+    if settings.auth_enabled:
+        app.add_middleware(AuthMiddleware,
+            engine=async_engine,
+            exempt_paths=settings.auth_exempt_paths,
+        )
 
     # Routers
     app.include_router(health.router, tags=["Health"])

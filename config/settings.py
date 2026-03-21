@@ -98,6 +98,10 @@ class Settings(BaseSettings):
     auth_enabled: bool = True
     auth_exempt_paths: list[str] = ["/health/live", "/health/ready", "/docs", "/redoc", "/openapi.json"]
 
+    # Rate limiting
+    rate_limit_requests: int = 100
+    rate_limit_window_seconds: int = 60
+
     # Nested settings
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     crm: CRMSettings = Field(default_factory=CRMSettings)

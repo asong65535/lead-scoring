@@ -64,17 +64,18 @@ class LoggingMiddleware:
                 status_code = message["status"]
             await send(message)
 
-        await self.app(scope, receive, send_wrapper)
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            duration_ms = round((time.monotonic() - start) * 1000, 2)
+            request_id = scope.get("state", {}).get("request_id", "unknown")
+            method = scope.get("method", "?")
 
-        duration_ms = round((time.monotonic() - start) * 1000, 2)
-        request_id = scope.get("state", {}).get("request_id", "unknown")
-        method = scope.get("method", "?")
-
-        logger.info(
-            "http_request",
-            method=method,
-            path=path,
-            status_code=status_code,
-            duration_ms=duration_ms,
-            request_id=request_id,
-        )
+            logger.info(
+                "http_request",
+                method=method,
+                path=path,
+                status_code=status_code,
+                duration_ms=duration_ms,
+                request_id=request_id,
+            )

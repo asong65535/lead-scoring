@@ -28,6 +28,7 @@ def _to_response(result: ScoreResult) -> ScoreResponse:
     )
 
 
+# /batch must be declared before /{lead_id} so FastAPI matches it literally
 @router.post("/batch", response_model=BatchScoreResponse)
 async def score_batch(
     body: BatchScoreRequest,

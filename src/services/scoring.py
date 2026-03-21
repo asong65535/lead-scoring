@@ -114,6 +114,7 @@ class ScoringService:
             scored_at=scored_at,
         )
         self._session.add(pred)
+        await self._session.commit()
 
         return ScoreResult(
             lead_id=lead_id,
@@ -173,4 +174,5 @@ class ScoringService:
                 scored_at=scored_at,
             ))
 
+        await self._session.commit()
         return results, missing_ids

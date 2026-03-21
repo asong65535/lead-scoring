@@ -1,12 +1,10 @@
 """Tests for ScoringService — uses mocks for model and feature computer."""
 
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import numpy as np
-import pandas as pd
 import pytest
 
 from src.services.scoring import ScoringService, ScoreResult
@@ -129,6 +127,7 @@ class TestScoreLead:
         pred = service._session.add.call_args[0][0]
         assert pred.lead_id == lead_id
         assert pred.score == pytest.approx(0.8)
+        service._session.commit.assert_awaited_once()
 
 
 class TestScoreLeads:
@@ -160,3 +159,4 @@ class TestScoreLeads:
         assert len(results) == 2
         assert missing == [id_missing]
         assert results[0].lead_id == id1
+        session.commit.assert_awaited_once()

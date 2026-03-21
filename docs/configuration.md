@@ -53,6 +53,14 @@ All variables can be set in the shell or in a `.env` file at the project root. T
 | `DEBUG` | bool | `false` | No |
 | `HOST` | str | `0.0.0.0` | No |
 | `PORT` | int | `8000` | No |
+| `AUTH_ENABLED` | bool | `true` | No |
+| `AUTH_EXEMPT_PATHS` | list[str] | `["/health/live", "/health/ready", "/docs", "/redoc", "/openapi.json"]` | No |
+| `RATE_LIMIT_REQUESTS` | int | `100` | No |
+| `RATE_LIMIT_WINDOW_SECONDS` | int | `60` | No |
+
+`AUTH_ENABLED` controls whether the `AuthMiddleware` is registered. When `false`, all endpoints are accessible without a Bearer token. `AUTH_EXEMPT_PATHS` lists paths that skip authentication even when auth is enabled (health probes and OpenAPI docs by default).
+
+`RATE_LIMIT_REQUESTS` and `RATE_LIMIT_WINDOW_SECONDS` configure the sliding-window rate limiter. Each client IP is allowed `RATE_LIMIT_REQUESTS` requests within a rolling `RATE_LIMIT_WINDOW_SECONDS` window before receiving 429 responses.
 
 ### Database (`DatabaseSettings`, prefix `DB_`)
 

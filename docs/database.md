@@ -4,7 +4,7 @@ PostgreSQL 15, async SQLAlchemy 2.0, asyncpg driver, Alembic migrations.
 
 ## Schema Overview
 
-All five tables inherit `id`, `created_at`, and `updated_at` from `TimestampMixin` (see `src/models/base.py`). The `id` column is a UUID generated server-side via `gen_random_uuid()`.
+Six tables are defined. `leads`, `events`, `predictions`, `model_registry`, and `crm_sync_log` inherit `id`, `created_at`, and `updated_at` from `TimestampMixin` (see `src/models/base.py`). The `api_keys` table defines its own `id` and `created_at` columns (no `updated_at`). All `id` columns are UUIDs generated server-side via `gen_random_uuid()`.
 
 ```mermaid
 erDiagram
@@ -80,6 +80,14 @@ erDiagram
         varchar(20) status "NOT NULL DEFAULT pending"
         text error_message
         timestamptz synced_at
+    }
+
+    api_keys {
+        uuid id PK
+        varchar(64) key_hash "UNIQUE NOT NULL"
+        varchar(255) label "NOT NULL"
+        boolean is_active "DEFAULT true"
+        timestamptz created_at
     }
 
     leads ||--o{ events : "CASCADE delete"
@@ -244,6 +252,30 @@ Source: `src/models/crm_sync_log.py`
 
 ---
 
+### `api_keys`
+
+Source: `src/models/api_key.py`
+
+Stores hashed API keys for Bearer token authentication. Raw keys are never stored — only the SHA-256 hash is persisted.
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| `id` | UUID | NOT NULL | PK, server default `gen_random_uuid()` |
+| `key_hash` | VARCHAR(64) | NOT NULL | UNIQUE, indexed; SHA-256 hex digest |
+| `label` | VARCHAR(255) | NOT NULL | human-readable identifier for the key |
+| `is_active` | BOOLEAN | NOT NULL | server default `true`; set to `false` on revocation |
+| `created_at` | timestamptz | NOT NULL | server default `now()` |
+
+**Indexes:**
+
+| Name | Columns | Notes |
+|---|---|---|
+| `ix_api_keys_key_hash` | `key_hash` | unique index for auth lookups |
+
+Keys are managed via `scripts/manage_keys.py` (create, revoke, list). See [Deployment](deployment.md) for usage.
+
+---
+
 ## Migrations
 
 Migrations live under `alembic/` and are configured in `alembic.ini`. The migration runner in `alembic/env.py` uses an async engine (`create_async_engine`) so migrations run against asyncpg. Offline mode uses `settings.database.sync_url`; online mode uses `settings.database.url`.
@@ -254,6 +286,7 @@ Migrations live under `alembic/` and are configured in `alembic.ini`. The migrat
 |---|---|
 | `49ec235a15ed` | Initial schema — creates `leads`, `model_registry`, `crm_sync_log`, `predictions` |
 | `ca7959e931e2` | Adds `events` table and `converted_at` column to `leads` |
+| `ff52009bc0c5` | Adds `api_keys` table with unique index on `key_hash` |
 
 ### Common commands
 
@@ -282,10 +315,14 @@ Source: `src/models/database.py`
 
 **Engine** — created with `create_async_engine` (asyncpg driver). Pool parameters come from `settings.database`:
 
-| Parameter | Setting key |
+| Parameter | Setting key / value |
 |---|---|
 | `pool_size` | `settings.database.pool_size` |
 | `max_overflow` | `settings.database.max_overflow` |
+| `pool_timeout` | `30` (hardcoded) |
+| `pool_pre_ping` | `True` (hardcoded) |
+
+`pool_timeout=30` ensures connection acquisition fails fast (30s) instead of hanging indefinitely when the pool is exhausted. `pool_pre_ping=True` sends a lightweight `SELECT 1` to detect stale connections (e.g., after a DB restart) before handing them to application code.
 
 **Session factory** — `AsyncSessionLocal` is an `async_sessionmaker` bound to the engine with `expire_on_commit=False`. Disabling expire-on-commit means ORM objects remain accessible after `session.commit()` without triggering lazy-load queries.
 

@@ -180,10 +180,58 @@ memory. The default path is `models/current.joblib` (env var
 
 **Hot reload**: Sending `POST /admin/reload-model` swaps the in-memory model
 without restarting the process. Useful after training a new version and
-promoting it in the registry.
+promoting it in the registry. The reload is protected by an `asyncio.Lock`
+to prevent concurrent reloads from corrupting model state. After loading, the
+model is validated for correct Pipeline structure (`predict_proba` method and
+`named_steps` containing a `"classifier"` step).
+
+**Graceful degradation**: If the model fails to load at startup (missing artifact,
+corrupted file, wrong format), the app starts anyway with `model = None`. Scoring
+endpoints return 503 until a model is successfully loaded via the reload endpoint.
 
 **Future**: Model artifacts will either be baked into the image at build time
 or fetched from object storage (e.g., S3) on startup, removing the dependency
 on a host-mounted `models/` directory.
 
 For `MODEL_ARTIFACT_PATH` and related env vars see [Configuration](configuration.md).
+
+---
+
+## Authentication & API Keys
+
+The API requires Bearer token authentication by default (`AUTH_ENABLED=true`).
+
+### Key Management CLI
+
+Use `scripts/manage_keys.py` to create, revoke, and list API keys:
+
+```bash
+# Create a new key (prints the raw key once — save it)
+poetry run python scripts/manage_keys.py create --label "production"
+
+# List all keys with status
+poetry run python scripts/manage_keys.py list
+
+# Revoke a key
+poetry run python scripts/manage_keys.py revoke --key <raw-key>
+```
+
+Keys are stored as SHA-256 hashes in the `api_keys` table — raw keys cannot
+be recovered from the database. See [Database](database.md) for the table schema.
+
+### Using API keys
+
+Pass the raw key as a Bearer token:
+
+```bash
+curl -H "Authorization: Bearer <api-key>" http://localhost:8000/score/<lead-id> -X POST
+```
+
+Health probes (`/health/live`, `/health/ready`) and OpenAPI docs (`/docs`, `/redoc`,
+`/openapi.json`) are exempt from authentication by default. Exempt paths are
+configurable via `AUTH_EXEMPT_PATHS`.
+
+### Disabling authentication
+
+Set `AUTH_ENABLED=false` in the environment to disable auth entirely (e.g., for
+local development or integration testing).

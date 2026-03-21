@@ -19,9 +19,12 @@ For the `model_registry` table schema, see [database.md](database.md).
 Internally, both methods query the lead and its events via SQLAlchemy (using `selectinload` for eager loading), then call `_compute_for_lead()`, which:
 
 1. Filters events to those with `occurred_at < as_of_date` (point-in-time safety).
-2. Iterates over all registered features, calling each computation function.
-3. Passes raw results through `validate_features()`.
-4. Appends `lead_id` and `computed_at` to the result dict.
+2. **Pre-buckets** filtered events by `event_type` into a `dict[str, list[Event]]` with a special `"_all"` key containing the full list. This avoids redundant per-function filtering across feature categories.
+3. Iterates over all registered features, calling each computation function with `(lead, events_by_type, as_of_date)`. Each call is wrapped in try/catch — if a feature function raises, the error is logged and the feature is left absent (the validation layer applies the YAML default).
+4. Passes raw results through `validate_features()`.
+5. Appends `lead_id` and `computed_at` to the result dict.
+
+`compute_batch()` returns `dict[UUID, dict]` keyed by lead_id (rather than a list), making it robust for datasets with sparse lead availability.
 
 ### Feature Registry (`src/services/features/registry.py`)
 
@@ -66,9 +69,9 @@ Every computation function receives `as_of_date` as its third argument. `Feature
 
 ## Preprocessing (`src/ml/preprocessing.py`)
 
-The preprocessing pipeline handles 17 MVP features: 12 numeric and 5 boolean.
+The preprocessing pipeline handles 17 MVP features: 12 numeric and 5 boolean. Both types are passed through unchanged — XGBoost handles numeric and boolean inputs natively.
 
-**12 numeric features** (`NUMERIC_FEATURES`) — passed through unchanged (XGBoost handles numeric inputs natively):
+**12 numeric features** (`NUMERIC_FEATURES`):
 
 ```
 days_since_last_visit, days_since_last_email_open, days_since_first_touch,
@@ -77,7 +80,7 @@ emails_opened_30d, emails_clicked_30d, avg_pages_per_session,
 avg_session_duration_seconds, pricing_page_views, engagement_velocity_7d
 ```
 
-**5 boolean features** (`BOOLEAN_FEATURES`) — cast to `int` (0/1) via `FunctionTransformer`:
+**5 boolean features** (`BOOLEAN_FEATURES`):
 
 ```
 viewed_pricing, requested_demo, downloaded_content,
@@ -90,7 +93,7 @@ visited_competitor_comparison, is_engagement_increasing
 company_size_bucket, industry_match_icp, job_title_seniority
 ```
 
-`build_preprocessing_pipeline()` returns a sklearn `Pipeline` wrapping a `ColumnTransformer` with two named transformers: `"numeric"` (passthrough) and `"boolean"` (FunctionTransformer). The combined list `MVP_FEATURE_NAMES = NUMERIC_FEATURES + BOOLEAN_FEATURES` defines the 17-column input the model expects.
+`build_preprocessing_pipeline()` returns a sklearn `Pipeline` wrapping a `ColumnTransformer` with two named transformers: `"numeric"` (passthrough) and `"boolean"` (passthrough). The combined list `MVP_FEATURE_NAMES = NUMERIC_FEATURES + BOOLEAN_FEATURES` defines the 17-column input the model expects.
 
 ---
 
@@ -106,14 +109,13 @@ poetry run python scripts/train.py [--tune] [--set-active]
 
 `build_training_dataset(engine, test_fraction=0.2)` builds labeled train/test DataFrames:
 
-1. Queries all leads where `converted IS NOT NULL`. Leads with `converted=True` but no `converted_at` are filtered out.
-2. Queries the latest event date per lead for use in as_of_date computation.
-3. Computes a point-in-time `as_of_date` for each lead via `compute_as_of_date()`:
+1. Queries all leads where `converted IS NOT NULL`, joined with the latest event date per lead in a single DB round-trip (using a subquery with `func.max(Event.occurred_at)` outer-joined to leads). Leads with `converted=True` but no `converted_at` are filtered out.
+2. Computes a point-in-time `as_of_date` for each lead via `compute_as_of_date()`:
    - **Converted leads**: `converted_at - 1 day`
    - **Non-converted leads**: `min(created_at + 90 days, now, latest_event_at)`
-4. Calls `FeatureComputer.compute_batch()` with the per-lead as_of_date map.
-5. Drops `lead_id`, `computed_at`, and firmographic placeholder columns. Adds `converted` (label) and `as_of_date`.
-6. Sorts by `as_of_date` and splits at the 80th percentile for a **time-based 80/20 split** — earlier records go to train, later records to test.
+3. Calls `FeatureComputer.compute_batch()` with the per-lead as_of_date map.
+4. Drops `lead_id`, `computed_at`, and firmographic placeholder columns. Adds `converted` (label) and `as_of_date`.
+5. Sorts by `as_of_date` and splits at the 80th percentile for a **time-based 80/20 split** — earlier records go to train, later records to test.
 
 ### Model (`src/ml/trainer.py`)
 
@@ -128,18 +130,21 @@ The model is an `XGBClassifier` wrapped in a sklearn `Pipeline` alongside the pr
 | `n_estimators` | 200 |
 | `max_depth` | 6 |
 | `learning_rate` | 0.1 |
-| `subsample` | 0.8 |
 | `colsample_bytree` | 0.8 |
 | `eval_metric` | `logloss` |
 | `random_state` | 42 |
 
 ### Optional Tuning (`src/ml/tuning.py`)
 
-The `--tune` flag triggers `tune_hyperparameters(X_train, y_train, preprocessing_pipeline)` before calling `train_model()`. It runs `GridSearchCV` with:
+The `--tune` flag triggers `tune_hyperparameters(X_train, y_train, preprocessing_pipeline)` before calling `train_model()`. It runs `RandomizedSearchCV` with:
 
+- `n_iter=20` (samples 20 random combinations from the grid)
 - `scoring="roc_auc"`
 - `StratifiedKFold(n_splits=5, shuffle=True, random_state=42)`
 - `n_jobs=-1` (parallel)
+- `random_state=42` (reproducible sampling)
+
+`RandomizedSearchCV` was chosen over `GridSearchCV` because it explores the hyperparameter space more efficiently — 20 random samples often find near-optimal settings faster than an exhaustive grid, especially as the parameter space grows.
 
 **Default parameter grid** (`DEFAULT_PARAM_GRID`):
 
@@ -148,7 +153,6 @@ The `--tune` flag triggers `tune_hyperparameters(X_train, y_train, preprocessing
 | `n_estimators` | 100, 200, 300 |
 | `max_depth` | 4, 6, 8 |
 | `learning_rate` | 0.05, 0.1, 0.2 |
-| `subsample` | 0.7, 0.8, 0.9 |
 
 The function returns the best hyperparameter dict (unprefixed), which is passed directly to `train_model()`.
 
@@ -219,7 +223,7 @@ flowchart TD
     dataset --> split["Time-based 80/20 split\n(sort by as_of_date)"]
     split --> train_df["train_df\n17 MVP features + label"]
     split --> test_df["test_df\n17 MVP features + label"]
-    train_df --> preprocess["build_preprocessing_pipeline()\nsrc/ml/preprocessing.py\n12 numeric passthrough\n5 boolean → int"]
+    train_df --> preprocess["build_preprocessing_pipeline()\nsrc/ml/preprocessing.py\n12 numeric passthrough\n5 boolean passthrough"]
     preprocess --> trainer["train_model()\nsrc/ml/trainer.py\nXGBClassifier\nscale_pos_weight"]
     test_df --> trainer
     trainer --> result["TrainResult\n(model, metrics, feature_importance)"]

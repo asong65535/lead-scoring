@@ -31,12 +31,33 @@ Interactive docs are available only when `DEBUG=true`:
 
 In production (`DEBUG=false`) both URLs return 404.
 
-### CORS
+### Authentication
 
-| Mode | Allowed origins |
-|------|----------------|
-| `DEBUG=true` | `*` (all origins) |
-| `DEBUG=false` | None |
+All endpoints require a valid API key passed as a Bearer token in the `Authorization` header, except paths listed in `AUTH_EXEMPT_PATHS` (default: `/health/live`, `/health/ready`, `/docs`, `/redoc`, `/openapi.json`). Authentication can be disabled entirely by setting `AUTH_ENABLED=false`.
+
+**Request header:**
+
+```
+Authorization: Bearer <api-key>
+```
+
+Keys are managed via the CLI tool `scripts/manage_keys.py` — see [Deployment](deployment.md) for details. Only the SHA-256 hash is stored in the database; raw keys cannot be recovered.
+
+**Error responses:**
+
+| Condition | Status | Body |
+|-----------|--------|------|
+| Missing or malformed header | 401 | `{"detail": "Missing or invalid Authorization header"}` |
+| Invalid or revoked key | 401 | `{"detail": "Invalid API key"}` |
+
+### Rate Limiting
+
+An in-memory sliding-window rate limiter enforces per-IP request limits. Default: **100 requests per 60 seconds**. When exceeded, the API returns `429 Too Many Requests`.
+
+| Setting | Default |
+|---------|---------|
+| `RATE_LIMIT_REQUESTS` | 100 |
+| `RATE_LIMIT_WINDOW_SECONDS` | 60 |
 
 See [configuration.md](configuration.md) for all environment variable details.
 
@@ -237,6 +258,8 @@ Hot-reload the active model from disk into `app.state` without restarting the se
 
 **No request body required.**
 
+Uses an `asyncio.Lock` to prevent concurrent reloads from corrupting model state. After loading, the model is validated to ensure it has a `predict_proba` method and the expected sklearn Pipeline structure (a `named_steps` dict containing a `"classifier"` step).
+
 **Response 200**
 
 ```json
@@ -252,6 +275,9 @@ Hot-reload the active model from disk into `app.state` without restarting the se
 |-----------|--------|------|
 | No active model in registry | 500 | `{"detail": "No active model in registry"}` |
 | Artifact file missing on disk | 500 | `{"detail": "Model artifact not found: <path>"}` |
+| Load exception | 500 | `{"detail": "Failed to load model: <ExceptionType>"}` |
+| Missing predict_proba | 500 | `{"detail": "Loaded model missing predict_proba method"}` |
+| Bad pipeline structure | 500 | `{"detail": "Loaded model missing expected pipeline structure"}` |
 
 ---
 
@@ -308,13 +334,14 @@ The `ScoringService` is instantiated fresh for each request, ensuring the DB ses
 
 ## Middleware
 
-Both middlewares use the raw ASGI interface (`__call__(scope, receive, send)`) rather than Starlette's `BaseHTTPMiddleware`. This avoids double-reading the request body, gives full control over response header injection, and improves performance on streaming responses.
+All middlewares use the raw ASGI interface (`__call__(scope, receive, send)`) rather than Starlette's `BaseHTTPMiddleware`. This avoids double-reading the request body, gives full control over response header injection, and improves performance on streaming responses.
 
-Middleware is applied in the following order (outermost to innermost as registered in `create_app()`):
+Middleware executes in the following order (outermost to innermost). In Starlette, the last middleware added via `add_middleware` is outermost:
 
-1. `LoggingMiddleware` — outermost, captures total request duration
-2. `RequestIDMiddleware` — injects request ID before logging reads it
-3. `CORSMiddleware` — Starlette built-in, innermost
+1. `AuthMiddleware` — outermost, rejects invalid tokens immediately (when `AUTH_ENABLED=true`)
+2. `RateLimitMiddleware` — sliding-window rate limiter per client IP
+3. `RequestIDMiddleware` — injects request ID into scope and response headers
+4. `LoggingMiddleware` — innermost, captures total request duration including all middleware layers
 
 ### RequestIDMiddleware (`src/api/middleware/request_id.py`)
 
@@ -324,6 +351,25 @@ For every `http` or `websocket` scope:
 2. Uses the header value if present; otherwise generates a `uuid4` string.
 3. Stores the ID in `scope["state"]["request_id"]` (accessible downstream as `request.state.request_id`).
 4. Appends `X-Request-ID: <id>` to all response headers.
+
+### RateLimitMiddleware (`src/api/middleware/rate_limit.py`)
+
+For every `http` scope:
+
+1. Extracts client IP from `scope["client"]`.
+2. Checks requests against a sliding window of `max_requests` per `window_seconds` (defaults: 100 / 60s).
+3. Prunes expired timestamps and rejects requests that exceed the limit with a 429 response.
+4. Tracks per-IP request timestamps in memory using `dict[str, list[float]]` with monotonic clock values.
+
+### AuthMiddleware (`src/api/middleware/auth.py`)
+
+For every `http` scope, unless the path is in `exempt_paths`:
+
+1. Reads the `Authorization` header and expects `Bearer <token>`.
+2. SHA-256 hashes the token and queries the `api_keys` table for a matching active key.
+3. Returns 401 if the token is missing, malformed, or not found.
+
+The middleware owns its own `async_sessionmaker` bound to the shared engine. Exempt paths (configurable via `AUTH_EXEMPT_PATHS`) skip authentication entirely.
 
 ### LoggingMiddleware (`src/api/middleware/logging.py`)
 

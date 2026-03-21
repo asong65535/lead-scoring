@@ -34,7 +34,8 @@ flowchart TD
     subgraph API["API Layer (src/api/)"]
         mw_rid["RequestIDMiddleware"]
         mw_log["LoggingMiddleware"]
-        mw_cors["CORSMiddleware"]
+        mw_rl["RateLimitMiddleware"]
+        mw_auth["AuthMiddleware"]
         routes["routes/\nhealth, scoring, webhooks, admin"]
         di["dependencies.py\nget_model() / get_feature_computer()\nget_scoring_service()"]
     end
@@ -45,6 +46,7 @@ flowchart TD
         predictions[("predictions")]
         registry[("model_registry")]
         crmsync[("crm_sync_log")]
+        apikeys[("api_keys")]
     end
 
     seed -->|"clean + batch insert\non_conflict_do_nothing"| ingestion
@@ -69,9 +71,11 @@ flowchart TD
     featcomp -->|"SELECT events"| events
     scoring -->|"INSERT prediction"| predictions
 
+    mw_auth --> mw_rl
+    mw_rl --> mw_rid
     mw_rid --> mw_log
-    mw_log --> mw_cors
-    mw_cors --> routes
+    mw_log --> routes
+    mw_auth -->|"validate key hash"| apikeys
 ```
 
 ---
@@ -88,17 +92,17 @@ XGBoost training pipeline: dataset assembly, preprocessing, hyperparameter tunin
 
 ### `src/models/`
 
-SQLAlchemy ORM models for all database tables (`Lead`, `Event`, `Prediction`, `ModelRegistry`, `CrmSyncLog`). See [Database](database.md).
+SQLAlchemy ORM models for all database tables (`Lead`, `Event`, `Prediction`, `ModelRegistry`, `CrmSyncLog`, `APIKey`). See [Database](database.md).
 
 ### `src/services/scoring.py`
 
-`ScoringService` is the scoring orchestrator. It accepts a `lead_id`, calls `FeatureComputer.compute()` to build a feature dict, runs the sklearn `Pipeline.predict_proba()`, assigns a bucket (A/B/C/D) based on configurable thresholds, extracts the top 5 feature importances as `top_factors`, and inserts a `Prediction` row then commits. Returns a `ScoreResult` dataclass. Also supports `score_leads()` for batch scoring in a single DB round-trip.
+`ScoringService` is the scoring orchestrator. It accepts a `lead_id`, calls `FeatureComputer.compute()` to build a feature dict, runs the sklearn `Pipeline.predict_proba()`, assigns a bucket (A/B/C/D) based on configurable thresholds, extracts the top 5 feature importances as `top_factors`, and inserts a `Prediction` row then commits. Returns a `ScoreResult` dataclass. Also supports `score_leads()` for batch scoring, which returns a 3-tuple: `(results, missing_ids, errors)` where `errors` is a list of `(lead_id, error_message)` tuples for leads that failed during scoring (partial failure support).
 
 Bucket thresholds (defaults): A ≥ 0.70, B ≥ 0.40, C ≥ 0.20, D < 0.20. Thresholds are configurable via `config/settings.py`.
 
 ### `src/services/features/`
 
-`FeatureComputer` in `computer.py` is engine-scoped and owns its own `async_sessionmaker`. On `compute(lead_id)`, it eagerly loads the `Lead` and its `events` via `selectinload` in a single query, then delegates to registered feature functions from `definitions/`. Feature categories: recency, frequency, intensity, intent, engagement, firmographic. `registry.py` maps feature names defined in `features.yaml` to their Python callables. `validation.py` validates computed values and applies defaults for any missing or out-of-range features.
+`FeatureComputer` in `computer.py` is engine-scoped and owns its own `async_sessionmaker`. On `compute(lead_id)`, it eagerly loads the `Lead` and its `events` via `selectinload` in a single query, then delegates to registered feature functions from `definitions/`. Events are pre-bucketed by type into a `dict[str, list[Event]]` (with a special `"_all"` key for the full list) before being passed to feature functions, avoiding redundant per-function filtering. Individual feature computations are wrapped in try/catch — if a feature function raises, the error is logged and `validate_features()` applies the YAML default for that feature. Feature categories: recency, frequency, intensity, intent, engagement, firmographic. `registry.py` maps feature names defined in `features.yaml` to their Python callables. `validation.py` validates computed values and applies defaults for any missing or out-of-range features. `compute_batch()` returns `dict[UUID, dict]` keyed by lead_id.
 
 ### `src/services/ingestion.py`
 
@@ -155,25 +159,29 @@ poetry run python scripts/generate_events.py
 
 Step-by-step walkthrough of `POST /score/{lead_id}`:
 
-1. **RequestIDMiddleware** — reads `X-Request-ID` from the incoming request headers or generates a new UUID. Attaches it to `request.state.request_id` and propagates it in the response headers.
-2. **LoggingMiddleware** — records the request start time before passing to the next layer.
-3. **CORSMiddleware** — handles CORS preflight and injects response headers.
-4. **FastAPI routing** — dispatches to `scoring.router` → `score_lead()` handler.
-5. **Dependency injection** — `get_model(request)` reads `app.state.model` and `app.state.model_version` (raises `ModelNotLoadedError` → 503 if absent); `get_feature_computer()` instantiates a `FeatureComputer` with the shared async engine; `get_scoring_service()` assembles `ScoringService` with the model, version, feature computer, per-request session, and bucket thresholds from settings.
-6. **ScoringService.score_lead(lead_id)**:
+1. **AuthMiddleware** — validates the Bearer token in the `Authorization` header. Hashes the token with SHA-256 and queries the `api_keys` table for a matching active key. Returns 401 if missing or invalid. Exempt paths (health probes, docs) skip this check.
+2. **RateLimitMiddleware** — checks the client IP against the sliding-window rate limiter. Returns 429 if the limit is exceeded.
+3. **RequestIDMiddleware** — reads `X-Request-ID` from the incoming request headers or generates a new UUID. Attaches it to `request.state.request_id` and propagates it in the response headers.
+4. **LoggingMiddleware** — records the request start time before passing to the next layer.
+5. **FastAPI routing** — dispatches to `scoring.router` → `score_lead()` handler.
+6. **Dependency injection** — `get_model(request)` reads `app.state.model` and `app.state.model_version` (raises `ModelNotLoadedError` → 503 if absent); `get_feature_computer()` instantiates a `FeatureComputer` with the shared async engine; `get_scoring_service()` assembles `ScoringService` with the model, version, feature computer, per-request session, and bucket thresholds from settings.
+7. **ScoringService.score_lead(lead_id)**:
    - `FeatureComputer.compute(lead_id)` — loads lead + events in one query, runs all registered feature functions, validates, returns feature dict.
    - `model.predict_proba(df)` — runs inference through the sklearn pipeline.
    - `assign_bucket(score, ...)` — maps probability to A/B/C/D.
    - `top_factors(...)` — extracts the 5 features with highest absolute importance.
    - `session.add(Prediction(...))` + `session.commit()` — persists the prediction row.
-7. **Returns `ScoreResponse` JSON** — includes `lead_id`, `score`, `bucket`, `model_version`, `top_factors`, `scored_at`.
-8. **LoggingMiddleware** — logs method, path, status code, and `duration_ms` at response time.
+8. **Returns `ScoreResponse` JSON** — includes `lead_id`, `score`, `bucket`, `model_version`, `top_factors`, `scored_at`.
+9. **LoggingMiddleware** — logs method, path, status code, and `duration_ms` at response time.
 
 ---
 
 ## Key Design Decisions
 
 - **Async SQLAlchemy 2.0 + asyncpg** — all DB I/O is non-blocking; the engine is shared at module level and reused across requests.
-- **Raw ASGI middleware** — `RequestIDMiddleware` and `LoggingMiddleware` are plain ASGI callables rather than Starlette `BaseHTTPMiddleware` subclasses, avoiding the double-buffering overhead of the higher-level API.
-- **In-process model loading** — at startup, `lifespan` queries `model_registry` for the active model and loads the artifact into `app.state.model`. No separate model server; inference runs in-process.
+- **Raw ASGI middleware** — All custom middlewares (`RequestIDMiddleware`, `LoggingMiddleware`, `RateLimitMiddleware`, `AuthMiddleware`) are plain ASGI callables rather than Starlette `BaseHTTPMiddleware` subclasses, avoiding the double-buffering overhead of the higher-level API.
+- **API key authentication** — Bearer token auth with SHA-256 hashing. Only the hash is stored in the database; raw keys are shown once at creation and cannot be recovered. Auth runs before rate limiting so invalid tokens are rejected immediately without consuming rate limit budget.
+- **In-process model loading** — at startup, `lifespan` queries `model_registry` for the active model and loads the artifact into `app.state.model`. If loading fails, the app starts in degraded mode (scoring returns 503). Model reloads are protected by an `asyncio.Lock` and validated for correct Pipeline structure before being swapped in.
+- **Resilient DB connections** — the async engine uses `pool_timeout=30` (fail fast instead of hanging) and `pool_pre_ping=True` (detect stale connections after DB restarts).
+- **Fault-tolerant feature computation** — individual feature function failures are caught and logged; the validation layer fills in YAML defaults for missing features, so a single bad feature doesn't block scoring.
 - **Three DI scopes** — application-state (model, loaded once at startup), engine-scoped (`FeatureComputer`, one per request but sharing the module-level engine), and per-request (`AsyncSession`, created and closed for each request via `get_session`).

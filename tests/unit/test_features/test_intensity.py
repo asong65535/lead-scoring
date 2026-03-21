@@ -1,5 +1,6 @@
 """Unit tests for intensity feature definitions."""
 
+from collections import defaultdict
 from datetime import datetime, timezone
 
 import pytest
@@ -17,6 +18,15 @@ def ts(offset_seconds: int):
     return datetime(2024, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=offset_seconds)
 
 
+def _bucket(events):
+    """Build events_by_type dict from a flat event list."""
+    by_type = defaultdict(list)
+    for e in events:
+        by_type[e.event_type].append(e)
+    by_type["_all"] = events
+    return dict(by_type)
+
+
 # ---------------------------------------------------------------------------
 # avg_pages_per_session
 # ---------------------------------------------------------------------------
@@ -29,18 +39,18 @@ class TestAvgPagesPerSession:
             make_test_event(event_type="page_view", properties={"session_id": "A"}),
             make_test_event(event_type="page_view", properties={"session_id": "B"}),
         ]
-        result = registry.get_function("avg_pages_per_session")(LEAD, events, AS_OF)
+        result = registry.get_function("avg_pages_per_session")(LEAD, _bucket(events), AS_OF)
         assert result == 2.0
 
     def test_no_page_views_returns_zero(self):
         events = [
             make_test_event(event_type="form_submit", properties={"session_id": "A"}),
         ]
-        result = registry.get_function("avg_pages_per_session")(LEAD, events, AS_OF)
+        result = registry.get_function("avg_pages_per_session")(LEAD, _bucket(events), AS_OF)
         assert result == 0
 
     def test_empty_events_returns_zero(self):
-        result = registry.get_function("avg_pages_per_session")(LEAD, [], AS_OF)
+        result = registry.get_function("avg_pages_per_session")(LEAD, {"_all": []}, AS_OF)
         assert result == 0
 
     def test_skips_events_without_session_id(self):
@@ -49,7 +59,7 @@ class TestAvgPagesPerSession:
             make_test_event(event_type="page_view", properties={"session_id": "A"}),
             make_test_event(event_type="page_view", properties=None),
         ]
-        result = registry.get_function("avg_pages_per_session")(LEAD, events, AS_OF)
+        result = registry.get_function("avg_pages_per_session")(LEAD, _bucket(events), AS_OF)
         assert result == 1.0
 
 
@@ -64,18 +74,18 @@ class TestAvgSessionDurationSeconds:
             make_test_event(event_type="page_view", properties={"session_id": "A"}, occurred_at=ts(120)),
             make_test_event(event_type="page_view", properties={"session_id": "B"}, occurred_at=ts(200)),
         ]
-        result = registry.get_function("avg_session_duration_seconds")(LEAD, events, AS_OF)
+        result = registry.get_function("avg_session_duration_seconds")(LEAD, _bucket(events), AS_OF)
         assert result == 60.0
 
     def test_no_page_views_returns_zero(self):
-        result = registry.get_function("avg_session_duration_seconds")(LEAD, [], AS_OF)
+        result = registry.get_function("avg_session_duration_seconds")(LEAD, {"_all": []}, AS_OF)
         assert result == 0
 
     def test_single_page_session_duration_is_zero(self):
         events = [
             make_test_event(event_type="page_view", properties={"session_id": "A"}, occurred_at=ts(0)),
         ]
-        result = registry.get_function("avg_session_duration_seconds")(LEAD, events, AS_OF)
+        result = registry.get_function("avg_session_duration_seconds")(LEAD, _bucket(events), AS_OF)
         assert result == 0.0
 
 
@@ -90,7 +100,7 @@ class TestPricingPageViews:
             make_test_event(event_type="page_view", event_name="Pricing"),
             make_test_event(event_type="page_view", event_name="Home"),
         ]
-        result = registry.get_function("pricing_page_views")(LEAD, events, AS_OF)
+        result = registry.get_function("pricing_page_views")(LEAD, _bucket(events), AS_OF)
         assert result == 2
 
     def test_no_pricing_views_returns_zero(self):
@@ -98,9 +108,9 @@ class TestPricingPageViews:
             make_test_event(event_type="page_view", event_name="Home"),
             make_test_event(event_type="form_submit", event_name="Pricing"),
         ]
-        result = registry.get_function("pricing_page_views")(LEAD, events, AS_OF)
+        result = registry.get_function("pricing_page_views")(LEAD, _bucket(events), AS_OF)
         assert result == 0
 
     def test_empty_events_returns_zero(self):
-        result = registry.get_function("pricing_page_views")(LEAD, [], AS_OF)
+        result = registry.get_function("pricing_page_views")(LEAD, {"_all": []}, AS_OF)
         assert result == 0

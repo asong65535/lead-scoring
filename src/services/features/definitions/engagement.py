@@ -18,14 +18,15 @@ def _engagement_score(events, start, end):
 
 
 @registry.register("engagement_velocity_7d")
-def engagement_velocity_7d(lead, events, as_of_date: datetime):
+def engagement_velocity_7d(lead, events_by_type: dict, as_of_date: datetime):
     midpoint = as_of_date - timedelta(days=3.5)
     window_start = as_of_date - timedelta(days=7)
-    recent = _engagement_score(events, midpoint, as_of_date)
-    older = _engagement_score(events, window_start, midpoint)
+    all_events = events_by_type.get("_all", [])
+    recent = _engagement_score(all_events, midpoint, as_of_date)
+    older = _engagement_score(all_events, window_start, midpoint)
     return recent - older
 
 
 @registry.register("is_engagement_increasing")
-def is_engagement_increasing(lead, events, as_of_date: datetime):
-    return engagement_velocity_7d(lead, events, as_of_date) > 0
+def is_engagement_increasing(lead, events_by_type: dict, as_of_date: datetime):
+    return engagement_velocity_7d(lead, events_by_type, as_of_date) > 0

@@ -7,10 +7,10 @@ from src.services.features.registry import registry
 
 
 @registry.register("avg_pages_per_session")
-def avg_pages_per_session(lead, events, as_of_date: datetime):
+def avg_pages_per_session(lead, events_by_type: dict, as_of_date: datetime):
     sessions = defaultdict(int)
-    for e in events:
-        if e.event_type == "page_view" and e.properties:
+    for e in events_by_type.get("page_view", []):
+        if e.properties:
             sid = e.properties.get("session_id")
             if sid:
                 sessions[sid] += 1
@@ -20,10 +20,10 @@ def avg_pages_per_session(lead, events, as_of_date: datetime):
 
 
 @registry.register("avg_session_duration_seconds")
-def avg_session_duration_seconds(lead, events, as_of_date: datetime):
+def avg_session_duration_seconds(lead, events_by_type: dict, as_of_date: datetime):
     sessions = defaultdict(list)
-    for e in events:
-        if e.event_type == "page_view" and e.properties:
+    for e in events_by_type.get("page_view", []):
+        if e.properties:
             sid = e.properties.get("session_id")
             if sid:
                 sessions[sid].append(e.occurred_at)
@@ -40,8 +40,5 @@ def avg_session_duration_seconds(lead, events, as_of_date: datetime):
 
 
 @registry.register("pricing_page_views")
-def pricing_page_views(lead, events, as_of_date: datetime):
-    return sum(
-        1 for e in events
-        if e.event_type == "page_view" and e.event_name == "Pricing"
-    )
+def pricing_page_views(lead, events_by_type: dict, as_of_date: datetime):
+    return sum(1 for e in events_by_type.get("page_view", []) if e.event_name == "Pricing")

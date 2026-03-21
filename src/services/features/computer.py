@@ -1,5 +1,6 @@
 """Feature computation orchestrator."""
 
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -29,10 +30,15 @@ class FeatureComputer:
         """Compute features for a single lead (no DB access)."""
         filtered = [e for e in events if e.occurred_at < as_of_date]
 
+        events_by_type: dict[str, list[Event]] = defaultdict(list)
+        for e in filtered:
+            events_by_type[e.event_type].append(e)
+        events_by_type["_all"] = filtered
+
         raw = {}
         for name in self._registry.computed_features():
             fn = self._registry.get_function(name)
-            raw[name] = fn(lead, filtered, as_of_date)
+            raw[name] = fn(lead, events_by_type, as_of_date)
 
         validated = validate_features(raw, self._registry, lead_id=str(lead.id))
         validated["lead_id"] = lead.id

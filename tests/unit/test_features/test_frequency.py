@@ -1,5 +1,6 @@
 """Unit tests for frequency feature definitions."""
 
+from collections import defaultdict
 from datetime import datetime, timedelta
 
 import pytest
@@ -19,6 +20,15 @@ def _lead():
     return make_test_lead()
 
 
+def _bucket(events):
+    """Build events_by_type dict from a flat event list."""
+    by_type = defaultdict(list)
+    for e in events:
+        by_type[e.event_type].append(e)
+    by_type["_all"] = events
+    return dict(by_type)
+
+
 # ---------------------------------------------------------------------------
 # total_pageviews_7d
 # ---------------------------------------------------------------------------
@@ -27,7 +37,7 @@ class TestTotalPageviews7d:
     def _compute(self, events):
         from src.services.features.registry import registry
         fn = registry.get_function("total_pageviews_7d")
-        return fn(_lead(), events, AS_OF)
+        return fn(_lead(), _bucket(events), AS_OF)
 
     def test_counts_page_views_in_window(self):
         in_window = [
@@ -75,7 +85,7 @@ class TestTotalPageviews30d:
     def _compute(self, events):
         from src.services.features.registry import registry
         fn = registry.get_function("total_pageviews_30d")
-        return fn(_lead(), events, AS_OF)
+        return fn(_lead(), _bucket(events), AS_OF)
 
     def test_counts_page_views_in_window(self):
         in_window = [
@@ -112,7 +122,7 @@ class TestTotalSessions:
     def _compute(self, events):
         from src.services.features.registry import registry
         fn = registry.get_function("total_sessions")
-        return fn(_lead(), events, AS_OF)
+        return fn(_lead(), _bucket(events), AS_OF)
 
     def test_counts_distinct_session_ids(self):
         events = [
@@ -160,7 +170,7 @@ class TestEmailsOpened30d:
     def _compute(self, events):
         from src.services.features.registry import registry
         fn = registry.get_function("emails_opened_30d")
-        return fn(_lead(), events, AS_OF)
+        return fn(_lead(), _bucket(events), AS_OF)
 
     def test_counts_email_opens_in_window(self):
         in_window = [
@@ -197,7 +207,7 @@ class TestEmailsClicked30d:
     def _compute(self, events):
         from src.services.features.registry import registry
         fn = registry.get_function("emails_clicked_30d")
-        return fn(_lead(), events, AS_OF)
+        return fn(_lead(), _bucket(events), AS_OF)
 
     def test_counts_email_clicks_in_window(self):
         in_window = [

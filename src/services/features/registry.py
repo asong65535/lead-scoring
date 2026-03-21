@@ -5,7 +5,7 @@ from typing import Any, Callable
 
 import yaml
 
-FeatureFunc = Callable  # (Lead, list[Event], datetime) → value
+FeatureFunc = Callable  # (Lead, dict[str, list[Event]], datetime) → value
 
 CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "features.yaml"
 

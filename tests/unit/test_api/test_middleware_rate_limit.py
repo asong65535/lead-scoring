@@ -33,6 +33,14 @@ def test_blocks_requests_over_limit():
 
 
 def test_non_http_passes_through():
+    """Non-http scopes (e.g. lifespan) pass through without rate limiting.
+
+    TestClient sends lifespan events on startup. With max_requests=1,
+    if lifespan counted against the limit the first real HTTP request
+    would be blocked.
+    """
     app = Starlette(routes=[Route("/", homepage)])
-    middleware = RateLimitMiddleware(app, max_requests=1, window_seconds=60)
-    assert middleware._max_requests == 1
+    app = RateLimitMiddleware(app, max_requests=1, window_seconds=60)
+    client = TestClient(app)
+    resp = client.get("/")
+    assert resp.status_code == 200

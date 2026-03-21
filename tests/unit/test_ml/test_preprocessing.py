@@ -42,10 +42,22 @@ def test_numeric_features_pass_through(sample_df):
 
 
 def test_boolean_features_pass_through(sample_df):
+    """Booleans pass through via passthrough transformer (no explicit FunctionTransformer).
+
+    sklearn's ColumnTransformer coerces bools to float64 when combining with
+    numeric columns, so the output values are 0.0/1.0. The key point is that
+    no custom bool-to-int transformer is needed — passthrough handles it.
+    """
     pipeline = build_preprocessing_pipeline()
     result = pipeline.fit_transform(sample_df)
-    assert all(result[0, 12:] == False)
-    assert all(result[1, 12:] == True)
+    assert all(result[0, 12:] == 0.0)
+    assert all(result[1, 12:] == 1.0)
+    # Verify no explicit bool transformer in the pipeline
+    preprocessor = pipeline.named_steps["preprocessor"]
+    for name, transformer, _ in preprocessor.transformers:
+        assert transformer == "passthrough", (
+            f"Transformer '{name}' should be passthrough, got {transformer}"
+        )
 
 
 def test_pipeline_feature_names_out(sample_df):

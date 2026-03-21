@@ -157,6 +157,8 @@ class TestScoreLeads:
         results, missing, errors = await svc.score_leads([id1, id2, id_missing])
 
         assert len(results) == 2
+        scored_ids = {r.lead_id for r in results}
+        assert scored_ids == {id1, id2}
         assert missing == [id_missing]
         assert errors == []
         session.commit.assert_awaited_once()

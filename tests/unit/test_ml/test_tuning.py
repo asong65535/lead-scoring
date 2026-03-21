@@ -46,7 +46,8 @@ def test_tune_respects_custom_grid(small_data):
     assert result["max_depth"] == 2
 
 
-def test_default_param_grid_has_no_subsample():
-    assert "subsample" not in DEFAULT_PARAM_GRID
+def test_default_param_grid_keys():
+    """Verify the param grid contains only the expected keys after subsample removal."""
+    assert set(DEFAULT_PARAM_GRID.keys()) == {"n_estimators", "max_depth", "learning_rate"}
 
 

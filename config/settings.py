@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
 
+    # Auth
+    auth_enabled: bool = True
+    auth_exempt_paths: list[str] = ["/health/live", "/health/ready", "/docs", "/redoc", "/openapi.json"]
+
     # Nested settings
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     crm: CRMSettings = Field(default_factory=CRMSettings)

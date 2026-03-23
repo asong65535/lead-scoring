@@ -20,6 +20,7 @@ flowchart LR
 - A/B/C/D bucket classification for sales prioritization
 - Prediction logging with explainability (top contributing factors)
 - Hot-reloadable model without server restart
+- Bidirectional HubSpot CRM integration with webhook-triggered rescoring
 
 ## Quick Start
 
@@ -84,7 +85,7 @@ lead-scoring/
 │   ├── api/          # FastAPI application
 │   ├── ml/           # ML training pipeline
 │   ├── models/       # SQLAlchemy ORM models
-│   └── services/     # Business logic (scoring, features, ingestion)
+│   └── services/     # Business logic (scoring, features, ingestion, CRM sync)
 ├── config/           # Settings and YAML configs
 ├── scripts/          # CLI tools (seed, train, generate events)
 ├── tests/            # Unit and integration tests
@@ -103,6 +104,7 @@ lead-scoring/
 - [Data Pipeline](docs/data-pipeline.md) — raw data source, cleaning, database ingestion
 - [ML Model](docs/ml-model.md) — feature engineering, training, evaluation, serialization
 - [API Reference](docs/api.md) — endpoints, middleware, error handling
+- [CRM Integration](docs/crm-integration.md) — HubSpot sync, webhooks, field mapping, retry logic
 - [Configuration](docs/configuration.md) — environment variables, YAML configs
 - [Database](docs/database.md) — schema, migrations, connection management
 - [Deployment](docs/deployment.md) — containers, local dev, production architecture

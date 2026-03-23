@@ -120,7 +120,7 @@ Bucket thresholds (defaults): A ≥ 0.70, B ≥ 0.40, C ≥ 0.20, D < 0.20. Thre
 
 ### `src/services/crm/`
 
-CRM integration layer for bidirectional sync between the scoring system and external CRM platforms.
+CRM integration layer for bidirectional sync between the scoring system and external CRM platforms. See [CRM Integration](crm-integration.md) for full details.
 
 - **`base.py`** — Abstract base class (`CRMClient`) defining the CRM client interface: `push_score()`, `fetch_contact()`, `fetch_contacts()`, `validate_webhook()`, `parse_webhook_event()`. Also defines the `WebhookEvent` dataclass.
 - **`factory.py`** — Factory function (`get_crm_client()`) that returns the appropriate `CRMClient` implementation based on settings. Returns `None` if CRM is disabled.

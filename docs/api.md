@@ -12,7 +12,8 @@ On startup, the lifespan context manager:
 2. Queries the `model_registry` table for the row where `is_active = true`.
 3. If found and the artifact file exists, loads the model via `load_model()` and stores it in `app.state.model` / `app.state.model_version`.
 4. If no active model exists or the artifact is missing, sets both to `None` and logs a warning. Scoring endpoints will return 503 until a model is loaded.
-5. On shutdown, disposes the async database engine.
+5. Initialises the CRM client via `get_crm_client(settings)` and stores it in `app.state.crm_client`. Logs `crm_client_initialized` if a client is created; the client is `None` when `CRM_TYPE=none`.
+6. On shutdown, calls `crm_client.close()` (if present) and disposes the async database engine.
 
 ### Running the server
 
@@ -76,8 +77,8 @@ See [configuration.md](configuration.md) for all environment variable details.
 | POST | `/score/batch` | Score up to 500 leads in one request | Stable |
 | GET | `/admin/model` | Return active model metadata | Stable |
 | POST | `/admin/reload-model` | Hot-reload model from registry into app state | Stable |
-| POST | `/webhooks/hubspot` | HubSpot webhook stub | Stub (Phase 7) |
-| POST | `/webhooks/salesforce` | Salesforce webhook stub | Stub (Phase 7) |
+| POST | `/webhooks/hubspot` | Receive HubSpot webhook events, trigger rescoring | Stable |
+| POST | `/webhooks/salesforce` | Salesforce webhook placeholder | Stub |
 
 ---
 
@@ -283,24 +284,39 @@ Uses an `asyncio.Lock` to prevent concurrent reloads from corrupting model state
 
 ### POST /webhooks/hubspot
 
-Stub endpoint for HubSpot webhook delivery. Accepts any JSON payload, logs the payload size, and returns `{"status": "received"}`. CRM event processing (contact sync, rescoring) is deferred to Phase 7.
+Receives webhook events from HubSpot, validates the request signature, filters events against configured rescore triggers, and rescores matching leads. See [CRM Integration](crm-integration.md) for the full webhook processing flow.
+
+**Request headers:**
+- `x-hubspot-signature-v3` — HMAC-SHA256 signature (required when `CRM_WEBHOOK_CLIENT_SECRET` is set)
+- `x-hubspot-request-timestamp` — Unix timestamp (rejected if older than 5 minutes)
+
+**Request body:** HubSpot webhook payload (array of subscription events).
 
 **Response 200**
 
 ```json
-{ "status": "received" }
+{ "status": "received", "processed": 2 }
 ```
+
+`processed` is the number of leads actually rescored (after filtering and debouncing).
+
+**Error responses**
+
+| Condition | Status | Body |
+|-----------|--------|------|
+| Invalid or missing signature | 401 | `{"detail": "Invalid webhook signature"}` |
+| Malformed JSON body | 400 | `{"detail": "Invalid JSON payload"}` |
 
 ---
 
 ### POST /webhooks/salesforce
 
-Stub endpoint for Salesforce webhook delivery. Same behaviour as `/webhooks/hubspot`. CRM logic deferred to Phase 7.
+Placeholder endpoint. Returns 200 with a notice that Salesforce webhook processing is not yet implemented. See [CRM Integration — Salesforce Readiness](crm-integration.md#salesforce-readiness).
 
 **Response 200**
 
 ```json
-{ "status": "received" }
+{ "status": "received", "message": "Salesforce webhooks not yet implemented" }
 ```
 
 ---
@@ -317,6 +333,10 @@ Returns `(model: Pipeline, model_version: str)` from `app.state`. Raises `ModelN
 
 Returns a `FeatureComputer` instance constructed with `async_engine`. The computer manages its own async sessions internally for feature reads. A new instance is created per call, but the underlying engine is shared at the process level.
 
+### `get_crm_client(request)` — application scope
+
+Returns the `CRMClient` instance (or `None`) from `app.state.crm_client`. Set during lifespan startup based on `CRM_TYPE`.
+
 ### `get_scoring_service(request, session)` — per-request scope
 
 Composes the above into a `ScoringService`:
@@ -324,11 +344,12 @@ Composes the above into a `ScoringService`:
 ```
 get_model(request)         → model, version
 get_feature_computer()     → feature_computer
+get_crm_client(request)    → CRMClient | None → CRMSyncService | None
 get_settings()             → bucket thresholds
 Depends(get_session)       → async DB session (for prediction writes)
 ```
 
-The `ScoringService` is instantiated fresh for each request, ensuring the DB session is properly scoped and cleaned up.
+The `ScoringService` is instantiated fresh for each request, ensuring the DB session is properly scoped and cleaned up. When a CRM client is available, a `CRMSyncService` is injected to handle fire-and-forget score writeback after prediction commit.
 
 ---
 

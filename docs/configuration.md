@@ -91,9 +91,15 @@ All variables can be set in the shell or in a `.env` file at the project root. T
 | `CRM_SALESFORCE_USERNAME` | str \| None | `None` | Conditional |
 | `CRM_SALESFORCE_PASSWORD` | str \| None | `None` | Conditional |
 | `CRM_SALESFORCE_SECURITY_TOKEN` | str \| None | `None` | Conditional |
+| `CRM_WEBHOOK_CLIENT_SECRET` | str \| None | `None` | Conditional |
+| `CRM_RESCORE_DEBOUNCE_SECONDS` | int | `60` | No |
 | `CRM_SALESFORCE_DOMAIN` | str | `login` | No |
 
 Conditional fields are only required when `CRM_TYPE` is set to the matching CRM. Use `login` for production Salesforce; use `test` for sandbox.
+
+`CRM_WEBHOOK_CLIENT_SECRET` is required for HubSpot webhook signature validation (HMAC-SHA256). Without it, webhook validation is skipped and a warning is logged.
+
+`CRM_RESCORE_DEBOUNCE_SECONDS` controls the minimum interval between automatic rescores for the same lead triggered by webhooks. Default 60 seconds.
 
 ### Model (`ModelSettings`, prefix `MODEL_`)
 
@@ -155,7 +161,7 @@ features:
 
 ### `config/crm.yaml`
 
-Defines field mappings for CRM integrations. This config is prepared for Phase 7 (CRM sync) and is not actively used by the current API.
+Defines field mappings, rescore triggers, and ICP criteria for CRM integrations. Actively used by the HubSpot client for field translation and webhook event filtering. See [CRM Integration](crm-integration.md) for details.
 
 **File structure**
 

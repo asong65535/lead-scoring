@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.exceptions import ModelNotLoadedError
 from src.models.database import async_engine, get_session
+from src.services.crm.base import CRMClient
+from src.services.crm.sync import CRMSyncService
 from src.services.features.computer import FeatureComputer
 from src.services.scoring import ScoringService
 
@@ -30,6 +32,10 @@ def get_feature_computer() -> FeatureComputer:
     return FeatureComputer(async_engine)
 
 
+def get_crm_client(request: Request) -> CRMClient | None:
+    return getattr(request.app.state, "crm_client", None)
+
+
 async def get_scoring_service(
     request: Request,
     session: AsyncSession = Depends(get_session),
@@ -37,6 +43,10 @@ async def get_scoring_service(
     model, version = get_model(request)
     feature_computer = get_feature_computer()
     settings = get_settings()
+
+    crm_client = get_crm_client(request)
+    crm_sync_service = CRMSyncService(crm_client=crm_client, session=session) if crm_client else None
+
     return ScoringService(
         model=model,
         model_version=version,
@@ -45,4 +55,5 @@ async def get_scoring_service(
         bucket_a=settings.model.bucket_a_threshold,
         bucket_b=settings.model.bucket_b_threshold,
         bucket_c=settings.model.bucket_c_threshold,
+        crm_sync_service=crm_sync_service,
     )

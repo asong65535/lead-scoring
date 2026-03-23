@@ -100,7 +100,10 @@ class Settings(BaseSettings):
 
     # Auth
     auth_enabled: bool = True
-    auth_exempt_paths: list[str] = ["/health/live", "/health/ready", "/docs", "/redoc", "/openapi.json"]
+    auth_exempt_paths: list[str] = [
+        "/health/live", "/health/ready", "/docs", "/redoc", "/openapi.json",
+        "/webhooks/hubspot", "/webhooks/salesforce",
+    ]
 
     # Rate limiting
     rate_limit_requests: int = 100

@@ -26,6 +26,7 @@ from src.api.routes import scoring
 from src.api.routes import webhooks
 from src.api.routes import admin
 from src.ml.serialization import load_model
+from src.services.crm.factory import get_crm_client as create_crm_client
 from src.models.database import async_engine
 from src.models.model_registry import ModelRegistry
 
@@ -81,7 +82,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.model_lock = asyncio.Lock()
     app.state.settings = settings
 
+    # Initialize CRM client
+    crm_client = create_crm_client(settings)
+    app.state.crm_client = crm_client
+    if crm_client:
+        logger.info("crm_client_initialized", crm_type=settings.crm.type)
+    else:
+        logger.info("crm_disabled")
+
     yield
+
+    # Close CRM client
+    if app.state.crm_client and hasattr(app.state.crm_client, "close"):
+        await app.state.crm_client.close()
 
     logger.info("app_shutting_down")
     await async_engine.dispose()

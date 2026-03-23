@@ -71,6 +71,20 @@ flowchart TD
     featcomp -->|"SELECT events"| events
     scoring -->|"INSERT prediction"| predictions
 
+    subgraph CRM["CRM Layer (src/services/crm/)"]
+        crmsvc["sync.py\nCRMSyncService"]
+        crmclient["hubspot.py\nHubSpotClient"]
+        crmretry["retry.py\nRetryService"]
+    end
+
+    scoring -->|"fire-and-forget\nwriteback"| crmsvc
+    crmsvc --> crmclient
+    crmclient -->|"push_score()"| HubSpot["HubSpot API"]
+    crmretry -->|"retry failed rows"| crmsvc
+    crmsvc -->|"INSERT/UPDATE"| crmsync
+    HubSpot -->|"webhooks"| routes
+    routes -->|"rescore"| scoring
+
     mw_auth --> mw_rl
     mw_rl --> mw_rid
     mw_rid --> mw_log
@@ -103,6 +117,20 @@ Bucket thresholds (defaults): A ≥ 0.70, B ≥ 0.40, C ≥ 0.20, D < 0.20. Thre
 ### `src/services/features/`
 
 `FeatureComputer` in `computer.py` is engine-scoped and owns its own `async_sessionmaker`. On `compute(lead_id)`, it eagerly loads the `Lead` and its `events` via `selectinload` in a single query, then delegates to registered feature functions from `definitions/`. Events are pre-bucketed by type into a `dict[str, list[Event]]` (with a special `"_all"` key for the full list) before being passed to feature functions, avoiding redundant per-function filtering. Individual feature computations are wrapped in try/catch — if a feature function raises, the error is logged and `validate_features()` applies the YAML default for that feature. Feature categories: recency, frequency, intensity, intent, engagement, firmographic. `registry.py` maps feature names defined in `features.yaml` to their Python callables. `validation.py` validates computed values and applies defaults for any missing or out-of-range features. `compute_batch()` returns `dict[UUID, dict]` keyed by lead_id.
+
+### `src/services/crm/`
+
+CRM integration layer for bidirectional sync between the scoring system and external CRM platforms.
+
+- **`base.py`** — Abstract base class (`CRMClient`) defining the CRM client interface: `push_score()`, `fetch_contact()`, `fetch_contacts()`, `validate_webhook()`, `parse_webhook_event()`. Also defines the `WebhookEvent` dataclass.
+- **`factory.py`** — Factory function (`create_crm_client()`) that returns the appropriate `CRMClient` implementation based on settings. Returns `None` if CRM is disabled.
+- **`hubspot.py`** — `HubSpotClient` implementation using the HubSpot REST API. Handles OAuth, score property updates, contact fetching, webhook signature validation (v3), and event parsing.
+- **`sync.py`** — `CRMSyncService` orchestrates score writeback. Called fire-and-forget from `ScoringService.score_lead()` after a prediction is committed. Writes a `CRMSyncLog` row for every attempt (success or failure) for auditability. Only triggers for leads with `source_system` in `{"hubspot", "salesforce"}`.
+- **`retry.py`** — `RetryService` sweeps `crm_sync_log` rows with `status="failed"` and `retry_count < max_retries`, re-attempts the push, and updates the log row. Designed to be called from a cron job or scheduled task.
+- **`errors.py`** — CRM-specific exception hierarchy (`CRMError`, `CRMAuthError`, `CRMRateLimitError`, `CRMValidationError`).
+- **`mock.py`** — `MockCRMClient` test double that records all calls for assertion.
+
+Webhook processing (`src/api/routes/webhooks.py`): validates the incoming webhook signature via the CRM client, parses events, filters against `rescore_triggers` from settings, debounces against recent predictions (configurable window), and rescores matching leads.
 
 ### `src/services/ingestion.py`
 

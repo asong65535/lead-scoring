@@ -6,7 +6,6 @@ It does NOT test actual HubSpot API calls -- those are mocked.
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import select
 
 from src.models.lead import Lead
 from src.models.prediction import Prediction

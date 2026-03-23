@@ -127,7 +127,7 @@ CRM integration layer for bidirectional sync between the scoring system and exte
 - **`hubspot.py`** — `HubSpotClient` implementation using the HubSpot REST API. Handles OAuth, score property updates, contact fetching, webhook signature validation (v3), and event parsing.
 - **`sync.py`** — `CRMSyncService` orchestrates score writeback. Called fire-and-forget from `ScoringService.score_lead()` after a prediction is committed. Writes a `CRMSyncLog` row for every attempt (success or failure) for auditability. Only triggers for leads with `source_system` in `{"hubspot", "salesforce"}`.
 - **`retry.py`** — `RetryService` sweeps `crm_sync_log` rows with `status="failed"` and `retry_count < max_retries`, re-attempts the push, and updates the log row. Designed to be called from a cron job or scheduled task.
-- **`errors.py`** — CRM-specific exception hierarchy (`CRMError`, `CRMAuthError`, `CRMRateLimitError`, `CRMValidationError`).
+- **`errors.py`** — CRM-specific exception hierarchy (`CRMError`, `CRMAuthError`, `CRMRateLimitError`, `CRMContactNotFoundError`, `CRMWritebackError`).
 - **`mock.py`** — `MockCRMClient` test double that records all calls for assertion.
 
 Webhook processing (`src/api/routes/webhooks.py`): validates the incoming webhook signature via the CRM client, parses events, filters against `rescore_triggers` from settings, debounces against recent predictions (configurable window), and rescores matching leads.

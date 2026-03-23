@@ -52,6 +52,18 @@ class TestShouldRescore:
         assert _should_rescore(event, rescore_triggers) is True
 
 
+    def test_unknown_change_type_returns_false(self, rescore_triggers):
+        from src.api.routes.webhooks import _should_rescore
+
+        event = WebhookEvent(
+            external_id="123",
+            change_type="unknown_type",
+            changed_fields=["jobtitle"],
+            raw={},
+        )
+        assert _should_rescore(event, rescore_triggers) is False
+
+
 class TestDebounce:
     """Test the debounce logic that skips rescoring if a lead was recently scored."""
 

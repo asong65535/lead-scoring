@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,6 +55,8 @@ async def _is_debounced(
         return False
 
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=debounce_seconds)
+    if last_scored.tzinfo is None:
+        last_scored = last_scored.replace(tzinfo=timezone.utc)
     return last_scored > cutoff
 
 
@@ -74,9 +76,12 @@ async def hubspot_webhook(
         valid = await crm_client.validate_webhook(headers, body)
         if not valid:
             logger.warning("hubspot_webhook_invalid_signature")
-            return {"status": "rejected", "reason": "invalid signature"}
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
-    payload = json.loads(body)
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
     if crm_client:
         events = await crm_client.parse_webhook_event(payload)
     else:

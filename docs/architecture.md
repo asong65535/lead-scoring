@@ -123,7 +123,7 @@ Bucket thresholds (defaults): A ≥ 0.70, B ≥ 0.40, C ≥ 0.20, D < 0.20. Thre
 CRM integration layer for bidirectional sync between the scoring system and external CRM platforms.
 
 - **`base.py`** — Abstract base class (`CRMClient`) defining the CRM client interface: `push_score()`, `fetch_contact()`, `fetch_contacts()`, `validate_webhook()`, `parse_webhook_event()`. Also defines the `WebhookEvent` dataclass.
-- **`factory.py`** — Factory function (`create_crm_client()`) that returns the appropriate `CRMClient` implementation based on settings. Returns `None` if CRM is disabled.
+- **`factory.py`** — Factory function (`get_crm_client()`) that returns the appropriate `CRMClient` implementation based on settings. Returns `None` if CRM is disabled.
 - **`hubspot.py`** — `HubSpotClient` implementation using the HubSpot REST API. Handles OAuth, score property updates, contact fetching, webhook signature validation (v3), and event parsing.
 - **`sync.py`** — `CRMSyncService` orchestrates score writeback. Called fire-and-forget from `ScoringService.score_lead()` after a prediction is committed. Writes a `CRMSyncLog` row for every attempt (success or failure) for auditability. Only triggers for leads with `source_system` in `{"hubspot", "salesforce"}`.
 - **`retry.py`** — `RetryService` sweeps `crm_sync_log` rows with `status="failed"` and `retry_count < max_retries`, re-attempts the push, and updates the log row. Designed to be called from a cron job or scheduled task.

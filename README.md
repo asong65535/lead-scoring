@@ -45,7 +45,7 @@ poetry run alembic upgrade head
 
 **Step 4 — Download dataset**
 
-Download the Kaggle Lead Scoring dataset and place the CSV at:
+Download the [Kaggle Lead Scoring dataset](https://www.kaggle.com/datasets/amritachatterjee09/lead-scoring-dataset/data) and place the CSV at:
 ```
 data/Lead Scoring.csv
 ```

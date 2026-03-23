@@ -23,6 +23,7 @@ class CRMSyncLog(TimestampMixin, Base):
     )
     error_message: Mapped[str | None] = mapped_column(Text)
     synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retry_count: Mapped[int] = mapped_column(default=0, server_default="0")
 
     lead: Mapped["Lead"] = relationship(back_populates="sync_logs")
 

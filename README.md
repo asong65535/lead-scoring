@@ -28,7 +28,7 @@ flowchart LR
 
 **Step 1 — Clone and install**
 ```bash
-git clone <repo-url> lead-scoring
+git clone https://github.com/asong65535/lead-scoring.git lead-scoring
 cd lead-scoring
 poetry install
 ```

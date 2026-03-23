@@ -40,6 +40,19 @@ hubspot:
     form_submit: FORM_SUBMISSION
     meeting_booked: MEETING_BOOKED
 
+  # Webhook events that trigger rescoring
+  rescore_triggers:
+    property_changes:
+      - lifecyclestage
+      - jobtitle
+      - numberofemployees
+      - industry
+    engagement_types:
+      - PAGE_VIEW
+      - EMAIL_OPEN
+      - EMAIL_CLICK
+      - FORM_SUBMISSION
+
 # ============================================
 # Salesforce Field Mappings
 # ============================================

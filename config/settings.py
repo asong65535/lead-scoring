@@ -60,6 +60,10 @@ class CRMSettings(BaseSettings):
     salesforce_security_token: str | None = None
     salesforce_domain: str = "login"  # or "test" for sandbox
 
+    # Webhooks
+    webhook_client_secret: str | None = None
+    rescore_debounce_seconds: int = 60
+
 
 class ModelSettings(BaseSettings):
     """ML model settings."""

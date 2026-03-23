@@ -4,6 +4,13 @@ Receives a fitted sklearn Pipeline (model), a FeatureComputer (engine-scoped),
 and a per-request AsyncSession (for writing Prediction rows).
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.services.crm.sync import CRMSyncService
+
 import structlog
 
 from dataclasses import dataclass
@@ -44,6 +51,7 @@ class ScoringService:
         bucket_a: float = 0.7,
         bucket_b: float = 0.4,
         bucket_c: float = 0.2,
+        crm_sync_service: CRMSyncService | None = None,
     ):
         self._model = model
         self._model_version = model_version
@@ -52,6 +60,7 @@ class ScoringService:
         self._bucket_a = bucket_a
         self._bucket_b = bucket_b
         self._bucket_c = bucket_c
+        self._crm_sync_service = crm_sync_service
 
     @staticmethod
     def assign_bucket(
@@ -117,10 +126,7 @@ class ScoringService:
             top_factors=factors,
             scored_at=scored_at,
         )
-        self._session.add(pred)
-        await self._session.commit()
-
-        return ScoreResult(
+        result = ScoreResult(
             lead_id=lead_id,
             score=proba,
             bucket=bucket,
@@ -128,6 +134,18 @@ class ScoringService:
             top_factors=factors,
             scored_at=scored_at,
         )
+
+        self._session.add(pred)
+        await self._session.commit()
+
+        # Fire-and-forget CRM writeback
+        if self._crm_sync_service:
+            from src.models.lead import Lead
+            lead = await self._session.get(Lead, lead_id)
+            if lead:
+                await self._crm_sync_service.trigger_writeback(lead, result)
+
+        return result
 
     async def score_leads(
         self, lead_ids: list[UUID],

@@ -162,3 +162,57 @@ class TestScoreLeads:
         assert missing == [id_missing]
         assert errors == []
         session.commit.assert_awaited_once()
+
+
+class TestCRMWriteback:
+    @pytest.fixture
+    def feature_names(self):
+        return ["total_visits", "total_time_spent", "page_views_per_visit"]
+
+    @pytest.fixture
+    def mock_sync_service(self):
+        svc = AsyncMock()
+        svc.trigger_writeback = AsyncMock()
+        return svc
+
+    @pytest.fixture
+    def service_with_sync(self, feature_names, mock_sync_service):
+        model = _make_mock_model(feature_names, [0.5, 0.3, 0.2])
+        session = AsyncMock()
+        mock_lead = MagicMock()
+        mock_lead.external_id = "ext-1"
+        mock_lead.source_system = "hubspot"
+        session.get = AsyncMock(return_value=mock_lead)
+        return ScoringService(
+            model=model,
+            model_version="v1.0",
+            feature_computer=AsyncMock(),
+            session=session,
+            crm_sync_service=mock_sync_service,
+        )
+
+    async def test_score_lead_triggers_writeback(
+        self, service_with_sync, mock_sync_service, feature_names,
+    ):
+        lead_id = uuid4()
+        service_with_sync._feature_computer.compute.return_value = _make_feature_dict(
+            lead_id, feature_names,
+        )
+        await service_with_sync.score_lead(lead_id)
+        mock_sync_service.trigger_writeback.assert_called_once()
+
+    async def test_score_lead_works_without_sync_service(self, feature_names):
+        model = _make_mock_model(feature_names, [0.5, 0.3, 0.2])
+        service = ScoringService(
+            model=model,
+            model_version="v1.0",
+            feature_computer=AsyncMock(),
+            session=AsyncMock(),
+            crm_sync_service=None,
+        )
+        lead_id = uuid4()
+        service._feature_computer.compute.return_value = _make_feature_dict(
+            lead_id, feature_names,
+        )
+        result = await service.score_lead(lead_id)
+        assert result.score >= 0.0

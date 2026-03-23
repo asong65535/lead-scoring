@@ -93,7 +93,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     # Close CRM client
-    if app.state.crm_client and hasattr(app.state.crm_client, "close"):
+    if app.state.crm_client:
         await app.state.crm_client.close()
 
     logger.info("app_shutting_down")

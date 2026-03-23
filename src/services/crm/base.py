@@ -42,6 +42,7 @@ class CRMClient(ABC):
     @abstractmethod
     async def validate_webhook(
         self, headers: dict[str, str], body: bytes,
+        method: str, uri: str,
     ) -> bool:
         """Verify that a webhook request is authentic."""
 
@@ -50,3 +51,7 @@ class CRMClient(ABC):
         self, payload: dict[str, Any],
     ) -> list[WebhookEvent]:
         """Parse a webhook payload into structured events."""
+
+    async def close(self) -> None:
+        """Clean up resources. Default no-op for clients that don't need it."""
+        pass

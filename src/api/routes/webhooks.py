@@ -73,7 +73,9 @@ async def hubspot_webhook(
 
     if crm_client:
         headers = dict(request.headers)
-        valid = await crm_client.validate_webhook(headers, body)
+        valid = await crm_client.validate_webhook(
+            headers, body, method=request.method, uri=str(request.url),
+        )
         if not valid:
             logger.warning("hubspot_webhook_invalid_signature")
             raise HTTPException(status_code=401, detail="Invalid webhook signature")

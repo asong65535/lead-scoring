@@ -31,7 +31,7 @@ async def test_fetch_contact_returns_configured_data():
 
 
 async def test_validate_webhook_returns_true_by_default(mock_client):
-    result = await mock_client.validate_webhook({}, b"body")
+    result = await mock_client.validate_webhook({}, b"body", method="POST", uri="http://example.com")
     assert result is True
 
 

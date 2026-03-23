@@ -118,35 +118,35 @@ class TestValidateWebhook:
     async def test_valid_signature_returns_true(self, client):
         body = b'[{"objectId": 123}]'
         ts = str(int(time.time()))
-        sig = self._sign("test-secret", "POST", "https://example.com/webhooks/hubspot", body, ts)
+        method = "POST"
+        uri = "https://example.com/webhooks/hubspot"
+        sig = self._sign("test-secret", method, uri, body, ts)
         headers = {
             "x-hubspot-signature-v3": sig,
             "x-hubspot-request-timestamp": ts,
-            "x-hubspot-request-method": "POST",
-            "x-hubspot-request-uri": "https://example.com/webhooks/hubspot",
         }
-        assert await client.validate_webhook(headers, body) is True
+        assert await client.validate_webhook(headers, body, method=method, uri=uri) is True
 
     async def test_tampered_signature_returns_false(self, client):
         headers = {
             "x-hubspot-signature-v3": "bad-signature",
             "x-hubspot-request-timestamp": str(int(time.time())),
-            "x-hubspot-request-method": "POST",
-            "x-hubspot-request-uri": "https://example.com/webhooks/hubspot",
         }
-        assert await client.validate_webhook(headers, b"body") is False
+        assert await client.validate_webhook(
+            headers, b"body", method="POST", uri="https://example.com/webhooks/hubspot",
+        ) is False
 
     async def test_expired_timestamp_returns_false(self, client):
         old_ts = str(int(time.time()) - 600)  # 10 minutes ago
         body = b"body"
-        sig = self._sign("test-secret", "POST", "https://example.com/webhooks/hubspot", body, old_ts)
+        method = "POST"
+        uri = "https://example.com/webhooks/hubspot"
+        sig = self._sign("test-secret", method, uri, body, old_ts)
         headers = {
             "x-hubspot-signature-v3": sig,
             "x-hubspot-request-timestamp": old_ts,
-            "x-hubspot-request-method": "POST",
-            "x-hubspot-request-uri": "https://example.com/webhooks/hubspot",
         }
-        assert await client.validate_webhook(headers, body) is False
+        assert await client.validate_webhook(headers, body, method=method, uri=uri) is False
 
 
 class TestParseWebhookEvent:

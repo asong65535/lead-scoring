@@ -81,4 +81,4 @@ class CRMSyncService:
             )
 
         self._session.add(sync_log)
-        await self._session.commit()
+        await self._session.flush()

@@ -81,6 +81,6 @@ async def retry_pending_writebacks(
                 exc_info=True,
             )
 
-    await session.commit()
+        await session.commit()
     logger.info("retry_sweep_complete", **summary)
     return summary

@@ -52,6 +52,7 @@ class MockCRMClient(CRMClient):
 
     async def validate_webhook(
         self, headers: dict[str, str], body: bytes,
+        method: str, uri: str,
     ) -> bool:
         return self.webhook_valid
 

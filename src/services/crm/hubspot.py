@@ -148,6 +148,7 @@ class HubSpotClient(CRMClient):
 
     async def validate_webhook(
         self, headers: dict[str, str], body: bytes,
+        method: str, uri: str,
     ) -> bool:
         if not self._client_secret:
             logger.warning("webhook_validation_skipped", reason="no client secret configured")
@@ -155,8 +156,6 @@ class HubSpotClient(CRMClient):
 
         signature = headers.get("x-hubspot-signature-v3", "")
         timestamp = headers.get("x-hubspot-request-timestamp", "")
-        method = headers.get("x-hubspot-request-method", "POST")
-        uri = headers.get("x-hubspot-request-uri", "")
 
         try:
             ts = int(timestamp)

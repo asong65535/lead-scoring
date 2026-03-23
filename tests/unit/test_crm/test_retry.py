@@ -39,7 +39,9 @@ async def test_retries_failed_writebacks():
         external_id="ext-1", score=0.85, bucket="A", top_factors=[], model_version="v1.0",
     )
     assert log.status == "success"
+    assert log.synced_at is not None
     assert summary["succeeded"] == 1
+    session.commit.assert_awaited()
 
 
 async def test_increments_retry_count_on_failure():
@@ -56,7 +58,9 @@ async def test_increments_retry_count_on_failure():
 
     assert log.retry_count == 3
     assert log.status == "failed"
+    assert log.error_message == "fail"
     assert summary["failed"] == 1
+    session.commit.assert_awaited()
 
 
 async def test_skips_when_no_pending_rows():
@@ -70,3 +74,4 @@ async def test_skips_when_no_pending_rows():
 
     assert summary["attempted"] == 0
     crm_client.push_score.assert_not_called()
+    session.commit.assert_not_awaited()

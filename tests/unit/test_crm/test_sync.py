@@ -35,6 +35,7 @@ def _make_lead(external_id="ext-1", source_system="hubspot"):
 def mock_session():
     session = AsyncMock()
     session.add = MagicMock()
+    session.flush = AsyncMock()
     session.commit = AsyncMock()
     session.execute = AsyncMock()
     return session
@@ -63,8 +64,16 @@ class TestTriggerWriteback:
         assert sync_log.source_system == "hubspot"
         assert sync_log.external_id == "ext-1"
         assert sync_log.status == "success"
+        assert sync_log.synced_at is not None
+
+        # Verify payload structure matches score_result
+        assert sync_log.payload["score"] == result.score
+        assert sync_log.payload["bucket"] == result.bucket
+        assert sync_log.payload["top_factors"] == result.top_factors
+        assert sync_log.payload["model_version"] == result.model_version
 
         assert len(mock_crm.push_score_calls) == 1
+        mock_session.flush.assert_awaited_once()
 
     async def test_failure_logs_error_and_marks_failed(self, mock_session):
         crm = MockCRMClient(push_score_error=CRMWritebackError("timeout"))
@@ -77,7 +86,12 @@ class TestTriggerWriteback:
 
         sync_log = mock_session.add.call_args[0][0]
         assert sync_log.status == "failed"
+        assert sync_log.synced_at is None
         assert "timeout" in sync_log.error_message
+        # Payload should still be populated even on failure (for retry)
+        assert sync_log.payload["score"] == result.score
+        assert sync_log.payload["bucket"] == result.bucket
+        mock_session.flush.assert_awaited_once()
 
     async def test_skips_writeback_for_non_crm_leads(self, sync_service, mock_session, mock_crm):
         lead = _make_lead(source_system="kaggle")

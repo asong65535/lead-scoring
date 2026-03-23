@@ -175,3 +175,5 @@ class TestParseWebhookEvent:
         events = await client.parse_webhook_event(payload)
         assert len(events) == 1
         assert events[0].external_id == "456"
+        assert events[0].change_type == "engagement"
+        assert events[0].changed_fields == []

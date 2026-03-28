@@ -50,10 +50,12 @@ from src.models.retraining_run import RetrainingRun
 logger = structlog.get_logger()
 
 
-def determine_triggered_by(force: bool) -> str:
+def determine_triggered_by(force: bool, scheduled: bool = False) -> str:
     """Determine the triggered_by value based on CLI flags."""
     if force:
         return "force"
+    if scheduled:
+        return "scheduled"
     return "manual"
 
 
@@ -215,11 +217,13 @@ async def execute_retrain(
     force: bool,
     dry_run: bool,
     settings: Settings,
+    since: str | None = None,
+    scheduled: bool = False,
 ) -> dict:
     """Execute the full retraining pipeline. Returns a summary dict."""
     started_at = datetime.now(timezone.utc)
     start_mono = time.monotonic()
-    triggered_by = determine_triggered_by(force)
+    triggered_by = determine_triggered_by(force, scheduled)
 
     # Step 1: Load active model info
     active_info = await get_active_model_info(engine)
@@ -244,6 +248,8 @@ async def execute_retrain(
             )
 
     # Step 3: Build training dataset
+    if since:
+        logger.info("since_override", since=since)
     train_df, test_df = await build_training_dataset(engine)
     training_data_stats = compute_training_data_stats(train_df, test_df)
 
@@ -391,6 +397,8 @@ async def main(
     tune: bool = False,
     force: bool = False,
     dry_run: bool = False,
+    since: str | None = None,
+    scheduled: bool = False,
 ) -> None:
     from src.models.database import async_engine
 
@@ -403,6 +411,8 @@ async def main(
             force=force,
             dry_run=dry_run,
             settings=settings,
+            since=since,
+            scheduled=scheduled,
         )
 
         comparison = summary["comparison"]
@@ -444,7 +454,7 @@ async def main(
             feature_baselines={},
             training_data_stats={},
             hyperparameters={},
-            triggered_by=determine_triggered_by(force),
+            triggered_by=determine_triggered_by(force, scheduled),
             duration_seconds=0,
             error_message=str(exc),
             started_at=datetime.now(timezone.utc),
@@ -459,6 +469,8 @@ if __name__ == "__main__":
     parser.add_argument("--tune", action="store_true", help="Run hyperparameter tuning")
     parser.add_argument("--force", action="store_true", help="Skip comparison gate, promote regardless")
     parser.add_argument("--dry-run", action="store_true", help="Train and compare but don't register or promote")
+    parser.add_argument("--since", type=str, default=None, help="Override training data window (YYYY-MM-DD)")
+    parser.add_argument("--scheduled", action="store_true", help="Mark run as cron-scheduled (for audit trail)")
     args = parser.parse_args()
 
-    asyncio.run(main(tune=args.tune, force=args.force, dry_run=args.dry_run))
+    asyncio.run(main(tune=args.tune, force=args.force, dry_run=args.dry_run, since=args.since, scheduled=args.scheduled))

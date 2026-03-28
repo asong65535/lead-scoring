@@ -71,6 +71,8 @@ def test_determine_triggered_by_flags():
     from scripts.retrain import determine_triggered_by
     assert determine_triggered_by(force=True) == "force"
     assert determine_triggered_by(force=False) == "manual"
+    assert determine_triggered_by(force=False, scheduled=True) == "scheduled"
+    assert determine_triggered_by(force=True, scheduled=True) == "force"  # force takes priority
 
 
 @pytest.mark.asyncio

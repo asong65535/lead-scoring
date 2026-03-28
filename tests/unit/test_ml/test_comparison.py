@@ -4,6 +4,8 @@ Tests verify the two-gate promotion system: AUC-ROC relative drop gate
 and calibration error absolute increase gate.
 """
 
+import pytest
+
 from config.settings import Settings
 from src.ml.comparison import compare_models, ComparisonResult
 
@@ -120,6 +122,3 @@ def test_missing_calibration_error_skips_gate():
     candidate = {"auc_roc": 0.88}
     result = compare_models(current, candidate)
     assert result.should_promote is True
-
-
-import pytest

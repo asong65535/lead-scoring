@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from src.ml.explainer import Explainer
     from src.services.crm.sync import CRMSyncService
 
 import structlog
@@ -52,6 +53,7 @@ class ScoringService:
         bucket_b: float = 0.4,
         bucket_c: float = 0.2,
         crm_sync_service: CRMSyncService | None = None,
+        explainer: Explainer | None = None,
     ):
         self._model = model
         self._model_version = model_version
@@ -61,6 +63,7 @@ class ScoringService:
         self._bucket_b = bucket_b
         self._bucket_c = bucket_c
         self._crm_sync_service = crm_sync_service
+        self._explainer = explainer
 
     @staticmethod
     def assign_bucket(
@@ -113,7 +116,10 @@ class ScoringService:
         bucket = self.assign_bucket(
             proba, self._bucket_a, self._bucket_b, self._bucket_c,
         )
-        factors = self.top_factors(feature_names, importances, features)
+        if self._explainer:
+            factors = self._explainer.explain(df)
+        else:
+            factors = self.top_factors(feature_names, importances, features)
         scored_at = datetime.now(timezone.utc)
 
         snapshot = {k: features[k] for k in feature_names}
@@ -178,7 +184,10 @@ class ScoringService:
                 bucket = self.assign_bucket(
                     proba, self._bucket_a, self._bucket_b, self._bucket_c,
                 )
-                factors = self.top_factors(feature_names, importances, feat_dict)
+                if self._explainer:
+                    factors = self._explainer.explain(df)
+                else:
+                    factors = self.top_factors(feature_names, importances, feat_dict)
                 snapshot = {k: feat_dict[k] for k in feature_names}
 
                 pred = Prediction(

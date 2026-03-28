@@ -47,6 +47,8 @@ async def get_scoring_service(
     crm_client = get_crm_client(request)
     crm_sync_service = CRMSyncService(crm_client=crm_client, session=session) if crm_client else None
 
+    explainer = getattr(request.app.state, "explainer", None)
+
     return ScoringService(
         model=model,
         model_version=version,
@@ -56,4 +58,5 @@ async def get_scoring_service(
         bucket_b=settings.model.bucket_b_threshold,
         bucket_c=settings.model.bucket_c_threshold,
         crm_sync_service=crm_sync_service,
+        explainer=explainer,
     )

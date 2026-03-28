@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.schemas import ModelInfoResponse, ReloadModelResponse
+from src.ml.explainer import Explainer
 from src.ml.serialization import load_model
 from src.models.database import get_session
 from src.models.model_registry import ModelRegistry
@@ -81,6 +82,7 @@ async def reload_model(
 
         request.app.state.model = model
         request.app.state.model_version = row.version
+        request.app.state.explainer = Explainer(model)
 
     logger.info("model_reloaded", version=row.version, artifact_path=str(artifact_path))
 

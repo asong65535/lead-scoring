@@ -25,6 +25,7 @@ from src.api.routes import health
 from src.api.routes import scoring
 from src.api.routes import webhooks
 from src.api.routes import admin
+from src.ml.explainer import Explainer
 from src.ml.serialization import load_model
 from src.services.crm.factory import get_crm_client as create_crm_client
 from src.models.database import async_engine
@@ -61,14 +62,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             try:
                 app.state.model = load_model(artifact_path)
                 app.state.model_version = active_model.version
+                app.state.explainer = Explainer(app.state.model)
                 logger.info("model_loaded", version=active_model.version)
             except Exception as exc:
                 app.state.model = None
                 app.state.model_version = None
+                app.state.explainer = None
                 logger.error("model_load_failed", version=active_model.version, error=str(exc))
         else:
             app.state.model = None
             app.state.model_version = None
+            app.state.explainer = None
             logger.warning(
                 "model_artifact_missing",
                 version=active_model.version,
@@ -77,6 +81,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         app.state.model = None
         app.state.model_version = None
+        app.state.explainer = None
         logger.warning("no_active_model_in_registry")
 
     app.state.model_lock = asyncio.Lock()

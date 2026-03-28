@@ -164,6 +164,88 @@ class TestScoreLeads:
         session.commit.assert_awaited_once()
 
 
+class TestSHAPExplainer:
+    async def test_score_lead_uses_explainer_when_provided(self):
+        """When an explainer is passed, top_factors come from SHAP, not global importance."""
+        feature_names = ["f1", "f2", "f3"]
+        model = _make_mock_model(feature_names, [0.5, 0.3, 0.2])
+
+        mock_explainer = MagicMock()
+        mock_explainer.explain.return_value = [
+            {"feature": "f2", "impact": 0.42, "value": 7.0},
+            {"feature": "f1", "impact": -0.15, "value": 3.0},
+        ]
+
+        svc = ScoringService(
+            model=model,
+            model_version="v1.0",
+            feature_computer=AsyncMock(),
+            session=AsyncMock(),
+            explainer=mock_explainer,
+        )
+
+        lead_id = uuid4()
+        svc._feature_computer.compute.return_value = _make_feature_dict(lead_id, feature_names)
+
+        result = await svc.score_lead(lead_id)
+
+        mock_explainer.explain.assert_called_once()
+        assert result.top_factors[0]["feature"] == "f2"
+        assert result.top_factors[0]["impact"] == 0.42
+
+    async def test_score_leads_uses_explainer_batch(self):
+        """Batch scoring uses explain_batch when explainer is provided."""
+        feature_names = ["f1", "f2"]
+        model = _make_mock_model(feature_names, [0.6, 0.4])
+        model.predict_proba.return_value = np.array([[0.3, 0.7]])
+
+        id1, id2 = uuid4(), uuid4()
+
+        mock_explainer = MagicMock()
+        mock_explainer.explain.side_effect = [
+            [{"feature": "f1", "impact": 0.3, "value": 1.0}],
+            [{"feature": "f2", "impact": 0.5, "value": 2.0}],
+        ]
+
+        feature_computer = AsyncMock()
+        feature_computer.compute_batch.return_value = {
+            id1: _make_feature_dict(id1, feature_names),
+            id2: _make_feature_dict(id2, feature_names),
+        }
+
+        svc = ScoringService(
+            model=model,
+            model_version="v1.0",
+            feature_computer=feature_computer,
+            session=AsyncMock(),
+            explainer=mock_explainer,
+        )
+
+        results, _, _ = await svc.score_leads([id1, id2])
+        assert mock_explainer.explain.call_count == 2
+
+    async def test_falls_back_to_global_importance_without_explainer(self):
+        """Without an explainer, top_factors use global feature importance."""
+        feature_names = ["f1", "f2", "f3"]
+        model = _make_mock_model(feature_names, [0.1, 0.7, 0.2])
+
+        svc = ScoringService(
+            model=model,
+            model_version="v1.0",
+            feature_computer=AsyncMock(),
+            session=AsyncMock(),
+            explainer=None,
+        )
+
+        lead_id = uuid4()
+        svc._feature_computer.compute.return_value = _make_feature_dict(lead_id, feature_names)
+
+        result = await svc.score_lead(lead_id)
+
+        # Global importance: f2 has highest (0.7)
+        assert result.top_factors[0]["feature"] == "f2"
+
+
 class TestCRMWriteback:
     @pytest.fixture
     def feature_names(self):

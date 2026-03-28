@@ -249,6 +249,39 @@ When no explainer is available (e.g., model failed to load), `ScoringService` fa
 
 ---
 
+## Retraining Pipeline
+
+### Automated Retraining
+
+`scripts/retrain.py` orchestrates weekly retraining. It reuses the same training modules (`build_training_dataset`, `train_model`, `save_model`, `register_model`) with added comparison and drift detection.
+
+### Model Comparison (`src/ml/comparison.py`)
+
+After training, the candidate model is compared against the active model:
+
+| Gate | Metric | Threshold | Direction |
+|------|--------|-----------|-----------|
+| Primary | AUC-ROC | 5% relative drop | higher is better |
+| Secondary | Calibration error | 0.05 absolute increase | lower is better |
+
+Both thresholds are configurable via `RETRAIN_*` environment variables.
+
+### Drift Detection (`src/ml/drift.py`)
+
+Drift is computed from stored `feature_snapshot` data in the `predictions` table:
+
+- **Numeric features:** Population Stability Index (PSI) using quantile-based binning. PSI > 0.2 = significant drift.
+- **Boolean features:** True-rate shift. Shift > 0.2 = significant.
+- **Prediction scores:** Mean, stddev, and distribution PSI compared against training baseline.
+
+Drift results are informational — logged, alerted via webhook, and persisted to `retraining_runs`. They do not block or trigger retraining.
+
+### Run Audit Trail
+
+Every retrain attempt (success, blocked, or failed) writes a `retraining_runs` row with: metrics comparison, drift results, feature baselines, training data stats, hyperparameters, and timing. See [Database](database.md) for schema.
+
+---
+
 ## Pipeline Diagram
 
 ```mermaid

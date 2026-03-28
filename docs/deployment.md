@@ -235,3 +235,44 @@ configurable via `AUTH_EXEMPT_PATHS`.
 
 Set `AUTH_ENABLED=false` in the environment to disable auth entirely (e.g., for
 local development or integration testing).
+
+---
+
+## Retraining Pipeline
+
+### Running a retrain
+
+```bash
+# Weekly retrain (cron calls this)
+docker compose run --rm app python scripts/retrain.py
+
+# With hyperparameter tuning
+docker compose run --rm app python scripts/retrain.py --tune
+
+# Force promote regardless of metric comparison
+docker compose run --rm app python scripts/retrain.py --force
+
+# Dry run — train and compare but don't persist or promote
+docker compose run --rm app python scripts/retrain.py --dry-run
+```
+
+### Example crontab
+
+```cron
+# Retrain every Sunday at 2am
+0 2 * * 0 cd /path/to/lead-scoring && docker compose run --rm app python scripts/retrain.py >> logs/retrain.log 2>&1
+```
+
+### How promotion works
+
+1. New model is trained and evaluated on the holdout set
+2. Metrics are compared against the active model:
+   - AUC-ROC must not drop more than 5% relative
+   - Calibration error must not increase more than 0.05 absolute
+3. If both gates pass: model is registered as active, API is hot-reloaded
+4. If either gate fails: model is registered but inactive, webhook alert sent
+5. Every run is recorded in the `retraining_runs` table
+
+### Webhook alerts
+
+Set `RETRAIN_WEBHOOK_URL` to receive JSON alerts. Events: `retrain.success`, `retrain.blocked`, `retrain.failed`, `drift.detected`.

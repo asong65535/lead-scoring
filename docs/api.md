@@ -10,8 +10,8 @@ On startup, the lifespan context manager:
 
 1. Calls `configure_logging(debug=settings.debug)` to initialise structlog.
 2. Queries the `model_registry` table for the row where `is_active = true`.
-3. If found and the artifact file exists, loads the model via `load_model()` and stores it in `app.state.model` / `app.state.model_version`.
-4. If no active model exists or the artifact is missing, sets both to `None` and logs a warning. Scoring endpoints will return 503 until a model is loaded.
+3. If found and the artifact file exists, loads the model via `load_model()` and stores it in `app.state.model` / `app.state.model_version`. Also creates an `Explainer(model)` for per-prediction SHAP explanations and stores it in `app.state.explainer`.
+4. If no active model exists or the artifact is missing, sets model, version, and explainer to `None` and logs a warning. Scoring endpoints will return 503 until a model is loaded.
 5. Initialises the CRM client via `get_crm_client(settings)` and stores it in `app.state.crm_client`. Logs `crm_client_initialized` if a client is created; the client is `None` when `CRM_TYPE=none`.
 6. On shutdown, calls `crm_client.close()` (if present) and disposes the async database engine.
 
@@ -162,7 +162,7 @@ Score a single lead by its UUID. Fetches features from the database, runs infere
 }
 ```
 
-`score` is a probability in `[0.0, 1.0]`. `bucket` is one of `A`, `B`, `C`, `D` (thresholds configured via `BUCKET_A_THRESHOLD`, `BUCKET_B_THRESHOLD`, `BUCKET_C_THRESHOLD` settings).
+`score` is a probability in `[0.0, 1.0]`. `bucket` is one of `A`, `B`, `C`, `D` (thresholds configured via `BUCKET_A_THRESHOLD`, `BUCKET_B_THRESHOLD`, `BUCKET_C_THRESHOLD` settings). `top_factors` contains per-prediction SHAP values — `impact` shows how each feature pushed *this lead's* score up (positive) or down (negative). See [ML Model — Explainability](ml-model.md#explainability-with-shap).
 
 **Error responses**
 
@@ -345,11 +345,12 @@ Composes the above into a `ScoringService`:
 get_model(request)         → model, version
 get_feature_computer()     → feature_computer
 get_crm_client(request)    → CRMClient | None → CRMSyncService | None
+app.state.explainer        → Explainer | None (SHAP TreeExplainer)
 get_settings()             → bucket thresholds
 Depends(get_session)       → async DB session (for prediction writes)
 ```
 
-The `ScoringService` is instantiated fresh for each request, ensuring the DB session is properly scoped and cleaned up. When a CRM client is available, a `CRMSyncService` is injected to handle fire-and-forget score writeback after prediction commit.
+The `ScoringService` is instantiated fresh for each request, ensuring the DB session is properly scoped and cleaned up. When a CRM client is available, a `CRMSyncService` is injected to handle fire-and-forget score writeback after prediction commit. The `Explainer` provides per-prediction SHAP values for `top_factors`; if `None`, the service falls back to global feature importance.
 
 ---
 

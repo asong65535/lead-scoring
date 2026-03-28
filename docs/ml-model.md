@@ -171,7 +171,7 @@ After training, `train_model()` evaluates the model on the holdout set and retur
 | `log_loss` | Cross-entropy loss |
 | `calibration_error` | Expected Calibration Error (ECE, equal-frequency bins) |
 
-Feature importances are extracted from `XGBClassifier.feature_importances_` and stored in `TrainResult.feature_importance` as a `{feature_name: float}` dict.
+Global feature importances are extracted from `XGBClassifier.feature_importances_` and stored in `TrainResult.feature_importance` as a `{feature_name: float}` dict. These are model-level importances (constant across all predictions). For per-prediction explanations, see the [Explainability](#explainability-with-shap) section below.
 
 ### Score Buckets
 
@@ -212,6 +212,43 @@ See [database.md](database.md) for the `model_registry` table schema.
 
 ---
 
+## Explainability with SHAP
+
+### Overview
+
+The `Explainer` class (`src/ml/explainer.py`) provides per-prediction feature explanations using SHAP (SHapley Additive exPlanations). Unlike global feature importance — which ranks features by their overall contribution across all predictions — SHAP values show how each feature pushed a *specific* lead's score up or down.
+
+For example, global importance might show that `pricing_page_views` is the #1 feature overall. But for a particular lead who never viewed pricing, SHAP reveals that `emails_clicked_30d` was what drove *their* high score.
+
+### How it works
+
+`Explainer` wraps SHAP's `TreeExplainer`, which exploits the XGBoost tree structure to compute exact Shapley values in polynomial time (no sampling or approximation). This makes it fast enough for real-time scoring.
+
+**Initialization:** The explainer is created once at API startup alongside the model and refreshed on model reload (`POST /admin/reload-model`). It is not serialized with the model artifact — it is reconstructed from the fitted pipeline each time.
+
+**Methods:**
+
+- `explain(df, n=5)` — explain a single-row DataFrame. Returns the top `n` factors sorted by absolute SHAP value.
+- `explain_batch(df, n=5)` — explain multiple rows. Returns a list of factor lists, one per row.
+
+**Output format:**
+
+```json
+[
+  {"feature": "pricing_page_views", "impact": 0.18, "value": 4},
+  {"feature": "requested_demo", "impact": 0.15, "value": true},
+  {"feature": "days_since_last_visit", "impact": -0.08, "value": 12}
+]
+```
+
+`impact` is the SHAP value for the positive class (conversion). Positive values push the score higher; negative values push it lower. `value` is the lead's actual feature value.
+
+### Fallback behavior
+
+When no explainer is available (e.g., model failed to load), `ScoringService` falls back to global feature importance from `XGBClassifier.feature_importances_`. This produces the same `top_factors` format but with model-level importance values rather than sample-specific SHAP values.
+
+---
+
 ## Pipeline Diagram
 
 ```mermaid
@@ -229,4 +266,6 @@ flowchart TD
     trainer --> result["TrainResult\n(model, metrics, feature_importance)"]
     result --> save["save_model()\nmodels/{version}.joblib\nmodels/{version}.meta.json"]
     result --> register["register_model()\nmodel_registry row"]
+    result --> explainer["Explainer(model)\nSHAP TreeExplainer\n(created at API startup)"]
+    explainer --> scoring["ScoringService\nexplain() per prediction"]
 ```

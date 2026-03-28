@@ -14,6 +14,7 @@ flowchart TD
         seed["scripts/seed_db.py\n(CSV → leads table)"]
         gentevents["scripts/generate_events.py\n(synthetic events → events table)"]
         train["scripts/train.py\n(build dataset → train → register)"]
+        batchscore["scripts/batch_score.py\n(nightly batch scoring)"]
     end
 
     subgraph ML["ML Layer (src/ml/)"]
@@ -22,6 +23,7 @@ flowchart TD
         trainer["trainer.py\ntrain_model()"]
         tuning["tuning.py\ntune_hyperparameters()"]
         serial["serialization.py\nsave_model() / register_model()"]
+        explainer["explainer.py\nExplainer (SHAP TreeExplainer)"]
     end
 
     subgraph Services["Service Layer (src/services/)"]
@@ -70,6 +72,8 @@ flowchart TD
     featcomp -->|"SELECT leads + events"| leads
     featcomp -->|"SELECT events"| events
     scoring -->|"INSERT prediction"| predictions
+    scoring -->|"per-sample SHAP"| explainer
+    batchscore --> scoring
 
     subgraph CRM["CRM Layer (src/services/crm/)"]
         crmsvc["sync.py\nCRMSyncService"]
@@ -102,7 +106,7 @@ FastAPI application factory, middleware stack, routers, exception handlers, and 
 
 ### `src/ml/`
 
-XGBoost training pipeline: dataset assembly, preprocessing, hyperparameter tuning, model serialization, and model registry management. See [ML Model](ml-model.md).
+XGBoost training pipeline: dataset assembly, preprocessing, hyperparameter tuning, model serialization, model registry management, and SHAP-based explainability. See [ML Model](ml-model.md).
 
 ### `src/models/`
 
@@ -110,7 +114,9 @@ SQLAlchemy ORM models for all database tables (`Lead`, `Event`, `Prediction`, `M
 
 ### `src/services/scoring.py`
 
-`ScoringService` is the scoring orchestrator. It accepts a `lead_id`, calls `FeatureComputer.compute()` to build a feature dict, runs the sklearn `Pipeline.predict_proba()`, assigns a bucket (A/B/C/D) based on configurable thresholds, extracts the top 5 feature importances as `top_factors`, and inserts a `Prediction` row then commits. Returns a `ScoreResult` dataclass. Also supports `score_leads()` for batch scoring, which returns a 3-tuple: `(results, missing_ids, errors)` where `errors` is a list of `(lead_id, error_message)` tuples for leads that failed during scoring (partial failure support).
+`ScoringService` is the scoring orchestrator. It accepts a `lead_id`, calls `FeatureComputer.compute()` to build a feature dict, runs the sklearn `Pipeline.predict_proba()`, assigns a bucket (A/B/C/D) based on configurable thresholds, and inserts a `Prediction` row then commits. Returns a `ScoreResult` dataclass. Also supports `score_leads()` for batch scoring, which returns a 3-tuple: `(results, missing_ids, errors)` where `errors` is a list of `(lead_id, error_message)` tuples for leads that failed during scoring (partial failure support).
+
+When an `Explainer` is provided (the default in the API), `top_factors` contains per-prediction SHAP values — sample-specific feature contributions showing how each feature pushed the score up or down for *this particular lead*. Without an explainer, it falls back to global feature importance from the XGBoost model.
 
 Bucket thresholds (defaults): A ≥ 0.70, B ≥ 0.40, C ≥ 0.20, D < 0.20. Thresholds are configurable via `config/settings.py`.
 
@@ -171,6 +177,23 @@ CLI flags:
 poetry run python scripts/train.py [--tune] [--set-active]
 ```
 
+### `scripts/batch_score.py`
+
+Standalone CLI worker for nightly batch scoring. Queries all leads (or only those modified since a given timestamp), chunks them, and scores each chunk via `ScoringService.score_leads()`. Each chunk gets its own DB session. Optionally triggers CRM writeback for scored leads.
+
+CLI flags:
+
+- `--chunk-size N` — leads per batch (default: 500).
+- `--since YYYY-MM-DD` — only score leads with `updated_at` after this date.
+- `--skip-crm` — disable CRM writeback even if configured.
+- `--dry-run` — compute scores without persisting predictions or writing back to CRM. Uses a savepoint + rollback to exercise the full pipeline without side effects.
+
+Prints a summary with total scored, errors, bucket distribution, and elapsed time.
+
+```
+poetry run python scripts/batch_score.py [--chunk-size 200] [--since 2026-03-01] [--skip-crm] [--dry-run]
+```
+
 ### `scripts/generate_events.py`
 
 Generates synthetic behavioral events for all leads that have no existing events (idempotent — skips leads that already have events). Event types: `page_view`, `email_open`, `email_click`, `form_submission`, `email_unsubscribe`. Converted leads receive 15–50 events with density biased toward the end of the time window; non-converted leads receive 3–20 events with flat/declining density. Event proportions differ between the two groups — converted leads get higher `email_click` and `form_submission` rates, non-converted get higher `email_unsubscribe` rates. Page views within 30 minutes inherit the same `session_id`. Inserts in batches of 500. Also writes `converted_at` timestamps back to converted leads.
@@ -192,12 +215,12 @@ Step-by-step walkthrough of `POST /score/{lead_id}`:
 3. **RequestIDMiddleware** — reads `X-Request-ID` from the incoming request headers or generates a new UUID. Attaches it to `request.state.request_id` and propagates it in the response headers.
 4. **LoggingMiddleware** — records the request start time before passing to the next layer.
 5. **FastAPI routing** — dispatches to `scoring.router` → `score_lead()` handler.
-6. **Dependency injection** — `get_model(request)` reads `app.state.model` and `app.state.model_version` (raises `ModelNotLoadedError` → 503 if absent); `get_feature_computer()` instantiates a `FeatureComputer` with the shared async engine; `get_scoring_service()` assembles `ScoringService` with the model, version, feature computer, per-request session, and bucket thresholds from settings.
+6. **Dependency injection** — `get_model(request)` reads `app.state.model` and `app.state.model_version` (raises `ModelNotLoadedError` → 503 if absent); `get_feature_computer()` instantiates a `FeatureComputer` with the shared async engine; `get_scoring_service()` assembles `ScoringService` with the model, version, feature computer, per-request session, bucket thresholds from settings, and the `Explainer` from `app.state.explainer`.
 7. **ScoringService.score_lead(lead_id)**:
    - `FeatureComputer.compute(lead_id)` — loads lead + events in one query, runs all registered feature functions, validates, returns feature dict.
    - `model.predict_proba(df)` — runs inference through the sklearn pipeline.
    - `assign_bucket(score, ...)` — maps probability to A/B/C/D.
-   - `top_factors(...)` — extracts the 5 features with highest absolute importance.
+   - `Explainer.explain(df)` — computes per-sample SHAP values and returns the top 5 factors by absolute impact. Falls back to global feature importance if no explainer is available.
    - `session.add(Prediction(...))` + `session.commit()` — persists the prediction row.
 8. **Returns `ScoreResponse` JSON** — includes `lead_id`, `score`, `bucket`, `model_version`, `top_factors`, `scored_at`.
 9. **LoggingMiddleware** — logs method, path, status code, and `duration_ms` at response time.
@@ -213,3 +236,4 @@ Step-by-step walkthrough of `POST /score/{lead_id}`:
 - **Resilient DB connections** — the async engine uses `pool_timeout=30` (fail fast instead of hanging) and `pool_pre_ping=True` (detect stale connections after DB restarts).
 - **Fault-tolerant feature computation** — individual feature function failures are caught and logged; the validation layer fills in YAML defaults for missing features, so a single bad feature doesn't block scoring.
 - **Three DI scopes** — application-state (model, loaded once at startup), engine-scoped (`FeatureComputer`, one per request but sharing the module-level engine), and per-request (`AsyncSession`, created and closed for each request via `get_session`).
+- **SHAP TreeExplainer** — the `Explainer` wraps SHAP's `TreeExplainer` for per-prediction feature contributions. Instantiated once at startup alongside the model (and refreshed on model reload). TreeExplainer uses the XGBoost tree structure directly, making it fast enough for real-time scoring without approximation.

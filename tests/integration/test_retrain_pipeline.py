@@ -1,7 +1,7 @@
 """Integration test for the full retrain pipeline.
 
-Requires: Postgres running, seeded data, at least one trained model.
-Run after: seed_db.py, generate_events.py, train.py --set-active
+Requires: Postgres running with leads + events data.
+Exercises the real training, comparison, and persistence path.
 """
 
 import pytest
@@ -63,7 +63,7 @@ async def _seed_leads(engine, n_converted=20, n_not_converted=30):
 
 
 async def test_execute_retrain_records_run(async_test_engine, tmp_path):
-    """Retrain pipeline should train a model, promote it, and insert a retraining_runs row."""
+    """Full retrain pipeline: seed data -> train real model -> persist run record with valid metrics."""
     await _seed_leads(async_test_engine, n_converted=20, n_not_converted=30)
     await generate_events(engine=async_test_engine, seed=42)
 
@@ -86,22 +86,44 @@ async def test_execute_retrain_records_run(async_test_engine, tmp_path):
 
     _created_model_versions.append(summary["candidate_version"])
 
-    assert summary["run_status"] in ("success", "blocked", "failed")
+    # First run with force=True should always succeed
+    assert summary["run_status"] == "success"
+    assert summary["promoted"] is True
     assert summary["candidate_version"].startswith("v")
 
+    # The real comparison ran against None (no prior model)
+    assert summary["comparison"].current_metrics is None
+    assert summary["comparison"].should_promote is True
+
+    # Candidate metrics came from real training — they should be valid ML metrics
+    candidate_metrics = summary["comparison"].candidate_metrics
+    assert 0.0 < candidate_metrics["auc_roc"] <= 1.0
+    assert candidate_metrics["calibration_error"] >= 0.0
+
+    # Verify the run was recorded in the database with correct data
     session_factory = async_sessionmaker(
         bind=async_test_engine, class_=AsyncSession, expire_on_commit=False,
     )
     async with session_factory() as session:
         result = await session.execute(
             select(RetrainingRun)
-            .order_by(RetrainingRun.started_at.desc())
-            .limit(1)
+            .where(RetrainingRun.candidate_version == summary["candidate_version"])
         )
-        run = result.scalar_one_or_none()
+        run = result.scalar_one()
 
-    assert run is not None
-    assert run.candidate_version == summary["candidate_version"]
-    assert run.candidate_metrics is not None
-    assert run.training_data_stats is not None
-    assert run.feature_baselines is not None
+    assert run.run_status == "success"
+    assert run.promoted is True
+    assert run.triggered_by == "force"
+    assert run.active_version_before is None  # first run, no prior model
+    assert run.duration_seconds > 0
+
+    # candidate_metrics in DB should match what training produced
+    assert run.candidate_metrics["auc_roc"] == candidate_metrics["auc_roc"]
+
+    # training_data_stats should reflect the seeded data
+    stats = run.training_data_stats
+    assert stats["total_rows"] == stats["train_rows"] + stats["test_rows"]
+    assert 0.0 < stats["train_positive_rate"] < 1.0
+
+    # feature_baselines should have entries for real features
+    assert len(run.feature_baselines) > 0

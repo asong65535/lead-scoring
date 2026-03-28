@@ -79,6 +79,20 @@ class ModelSettings(BaseSettings):
     bucket_c_threshold: float = 0.2
 
 
+class RetrainSettings(BaseSettings):
+    """Retraining pipeline settings."""
+
+    model_config = SettingsConfigDict(env_prefix="RETRAIN_")
+
+    webhook_url: str | None = None
+    primary_metric: str = "auc_roc"
+    max_relative_drop: float = 0.05
+    max_calibration_increase: float = 0.05
+    drift_psi_threshold: float = 0.2
+    drift_window_days: int = 7
+    min_drift_samples: int = 50
+
+
 class Settings(BaseSettings):
     """Main application settings."""
 
@@ -113,6 +127,7 @@ class Settings(BaseSettings):
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     crm: CRMSettings = Field(default_factory=CRMSettings)
     model: ModelSettings = Field(default_factory=ModelSettings)
+    retrain: RetrainSettings = Field(default_factory=RetrainSettings)
 
     # Config file paths
     config_dir: Path = Path(__file__).parent

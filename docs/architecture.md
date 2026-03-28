@@ -15,6 +15,7 @@ flowchart TD
         gentevents["scripts/generate_events.py\n(synthetic events → events table)"]
         train["scripts/train.py\n(build dataset → train → register)"]
         batchscore["scripts/batch_score.py\n(nightly batch scoring)"]
+        batchretrain["scripts/retrain.py\n(weekly retrain + compare + promote)"]
     end
 
     subgraph ML["ML Layer (src/ml/)"]
@@ -49,6 +50,7 @@ flowchart TD
         registry[("model_registry")]
         crmsync[("crm_sync_log")]
         apikeys[("api_keys")]
+        retraining_runs[("retraining_runs")]
     end
 
     seed -->|"clean + batch insert\non_conflict_do_nothing"| ingestion
@@ -81,6 +83,12 @@ flowchart TD
         crmretry["retry.py\nRetryService"]
     end
 
+    batchretrain --> dataset
+    batchretrain --> train
+    batchretrain --> serial
+    batchretrain -->|"drift detection"| predictions
+    batchretrain -->|"INSERT run"| retraining_runs
+
     scoring -->|"fire-and-forget\nwriteback"| crmsvc
     crmsvc --> crmclient
     crmclient -->|"push_score()"| HubSpot["HubSpot API"]
@@ -110,7 +118,7 @@ XGBoost training pipeline: dataset assembly, preprocessing, hyperparameter tunin
 
 ### `src/models/`
 
-SQLAlchemy ORM models for all database tables (`Lead`, `Event`, `Prediction`, `ModelRegistry`, `CrmSyncLog`, `APIKey`). See [Database](database.md).
+SQLAlchemy ORM models for all database tables (`Lead`, `Event`, `Prediction`, `ModelRegistry`, `CrmSyncLog`, `APIKey`, `RetrainingRun`). See [Database](database.md).
 
 ### `src/services/scoring.py`
 
@@ -137,6 +145,18 @@ CRM integration layer for bidirectional sync between the scoring system and exte
 - **`mock.py`** — `MockCRMClient` test double that records all calls for assertion.
 
 Webhook processing (`src/api/routes/webhooks.py`): validates the incoming webhook signature via the CRM client, parses events, filters against `rescore_triggers` from settings, debounces against recent predictions (configurable window), and rescores matching leads.
+
+### `src/ml/comparison.py`
+
+Compares candidate model metrics against the active model. Primary gate: AUC-ROC must not drop more than 5% relative. Secondary gate: calibration error must not increase more than 0.05 absolute. Returns `ComparisonResult` with promote/block decision and per-metric deltas.
+
+### `src/ml/drift.py`
+
+PSI-based drift detection. Computes Population Stability Index per feature by comparing training-time baselines against recent prediction feature snapshots. Also tracks prediction score distribution shifts. Returns `DriftResult` with drifted features flagged.
+
+### `src/ml/alerts.py`
+
+Webhook alerting. POSTs JSON payloads to a configurable URL for retrain outcomes (`retrain.success`, `retrain.blocked`, `retrain.failed`) and drift detection (`drift.detected`). Fire-and-forget — delivery failure is logged but never blocks the pipeline.
 
 ### `src/services/ingestion.py`
 
@@ -192,6 +212,16 @@ Prints a summary with total scored, errors, bucket distribution, and elapsed tim
 
 ```
 poetry run python scripts/batch_score.py [--chunk-size 200] [--since 2026-03-01] [--skip-crm] [--dry-run]
+```
+
+### `scripts/retrain.py`
+
+Orchestrates the full retraining pipeline. Loads the active model for comparison, runs drift detection against recent predictions, builds a fresh training dataset, trains a new model, compares metrics (AUC-ROC must not drop >5% relative, calibration error must not increase >0.05 absolute), and promotes or blocks the candidate. Every run is persisted to the `retraining_runs` table. Alerts via webhook on success, block, failure, or significant drift.
+
+CLI flags: `--tune`, `--force`, `--dry-run`.
+
+```bash
+docker compose run --rm app python scripts/retrain.py [--tune] [--force] [--dry-run]
 ```
 
 ### `scripts/generate_events.py`

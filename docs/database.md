@@ -90,6 +90,29 @@ erDiagram
         timestamptz created_at
     }
 
+    retraining_runs {
+        uuid id PK
+        timestamptz created_at
+        timestamptz updated_at
+        varchar(20) run_status "NOT NULL"
+        varchar(20) candidate_version "NOT NULL"
+        varchar(20) active_version_before
+        boolean promoted "NOT NULL"
+        jsonb current_metrics
+        jsonb candidate_metrics
+        jsonb metric_deltas
+        text comparison_reason
+        jsonb drift_result
+        jsonb feature_baselines
+        jsonb training_data_stats
+        jsonb hyperparameters
+        varchar(20) triggered_by "NOT NULL"
+        float duration_seconds
+        text error_message
+        timestamptz started_at "NOT NULL"
+        timestamptz completed_at
+    }
+
     leads ||--o{ events : "CASCADE delete"
     leads ||--o{ predictions : "RESTRICT delete"
     leads ||--o{ crm_sync_log : "RESTRICT delete"
@@ -252,6 +275,46 @@ Source: `src/models/crm_sync_log.py`
 
 ---
 
+### `retraining_runs`
+
+Source: `src/models/retraining_run.py`
+
+Tracks every retraining attempt for audit and analytics.
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| `id` | UUID | NOT NULL | PK |
+| `created_at` | timestamptz | NOT NULL | auto |
+| `updated_at` | timestamptz | NOT NULL | auto |
+| `run_status` | VARCHAR(20) | NOT NULL | CHECK: `success`, `blocked`, `failed` |
+| `candidate_version` | VARCHAR(20) | NOT NULL | |
+| `active_version_before` | VARCHAR(20) | NULL | version that was active when run started |
+| `promoted` | BOOLEAN | NOT NULL | |
+| `current_metrics` | JSONB | NULL | active model's metrics |
+| `candidate_metrics` | JSONB | NULL | new model's metrics |
+| `metric_deltas` | JSONB | NULL | per-metric absolute + relative changes |
+| `comparison_reason` | TEXT | NULL | human-readable promote/block reason |
+| `drift_result` | JSONB | NULL | PSI per feature, prediction drift |
+| `feature_baselines` | JSONB | NULL | training distribution summaries |
+| `training_data_stats` | JSONB | NULL | row counts, class balance |
+| `hyperparameters` | JSONB | NULL | |
+| `triggered_by` | VARCHAR(20) | NOT NULL | `scheduled`, `manual`, `force` |
+| `duration_seconds` | FLOAT | NULL | wall-clock time |
+| `error_message` | TEXT | NULL | populated on failed runs |
+| `started_at` | timestamptz | NOT NULL | |
+| `completed_at` | timestamptz | NULL | |
+
+**Check constraint** `ck_retraining_runs_status`: `run_status IN ('success', 'blocked', 'failed')`
+
+**Indexes:**
+
+| Name | Columns |
+|---|---|
+| `ix_retraining_runs_status` | `run_status` |
+| `ix_retraining_runs_started_at` | `started_at` |
+
+---
+
 ### `api_keys`
 
 Source: `src/models/api_key.py`
@@ -287,6 +350,7 @@ Migrations live under `alembic/` and are configured in `alembic.ini`. The migrat
 | `49ec235a15ed` | Initial schema — creates `leads`, `model_registry`, `crm_sync_log`, `predictions` |
 | `ca7959e931e2` | Adds `events` table and `converted_at` column to `leads` |
 | `ff52009bc0c5` | Adds `api_keys` table with unique index on `key_hash` |
+| `e4ef370cc0c3` | Adds `retraining_runs` table with status check constraint and indexes |
 
 ### Common commands
 

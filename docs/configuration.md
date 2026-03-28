@@ -115,6 +115,24 @@ The bucket thresholds define score ranges for lead grades. A score ≥ `BUCKET_A
 
 > **Note:** `.env.example` sets `MODEL_ARTIFACT_PATH=src/models/current.joblib`, but the code default in `settings.py` is `models/current.joblib`. When no `.env` file is present, the code default applies.
 
+### Retraining (`RetrainSettings`, prefix `RETRAIN_`)
+
+| Variable | Type | Default | Required |
+|----------|------|---------|----------|
+| `RETRAIN_WEBHOOK_URL` | str \| None | `None` | No |
+| `RETRAIN_PRIMARY_METRIC` | str | `auc_roc` | No |
+| `RETRAIN_MAX_RELATIVE_DROP` | float | `0.05` | No |
+| `RETRAIN_MAX_CALIBRATION_INCREASE` | float | `0.05` | No |
+| `RETRAIN_DRIFT_PSI_THRESHOLD` | float | `0.2` | No |
+| `RETRAIN_DRIFT_WINDOW_DAYS` | int | `7` | No |
+| `RETRAIN_MIN_DRIFT_SAMPLES` | int | `50` | No |
+
+`RETRAIN_WEBHOOK_URL` is the HTTP endpoint for alert delivery (Slack incoming webhook, PagerDuty, etc.). When not set, alerts are logged only.
+
+`RETRAIN_MAX_RELATIVE_DROP` gates the primary metric: a candidate model whose AUC-ROC drops by more than this fraction relative to the active model is blocked from promotion.
+
+`RETRAIN_DRIFT_PSI_THRESHOLD` sets the per-feature PSI threshold above which drift is considered significant.
+
 ---
 
 ## YAML Configs

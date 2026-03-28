@@ -5,6 +5,7 @@ from src.models.event import VALID_EVENT_TYPES, Event
 from src.models.lead import Lead
 from src.models.model_registry import ModelRegistry
 from src.models.prediction import Prediction
+from src.models.retraining_run import RetrainingRun
 
 __all__ = [
     "APIKey",
@@ -16,4 +17,5 @@ __all__ = [
     "Lead",
     "ModelRegistry",
     "Prediction",
+    "RetrainingRun",
 ]

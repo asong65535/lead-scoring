@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   # ============================================
   # Nginx Reverse Proxy
@@ -15,6 +13,11 @@ services:
       app:
         condition: service_healthy
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.25"
     networks:
       - lead-scoring-network
 
@@ -31,11 +34,6 @@ services:
     environment:
       - ENVIRONMENT=development
       - DEBUG=true
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=postgres
-      - DB_PASSWORD=postgres
-      - DB_NAME=lead_scoring
     env_file:
       - .env
     volumes:
@@ -55,9 +53,14 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2.0"
     networks:
       - lead-scoring-network
-    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+    command: ["--reload"]
 
   # ============================================
   # PostgreSQL Database
@@ -67,10 +70,12 @@ services:
     container_name: lead-scoring-db
     ports:
       - "5432:5432"
+    env_file:
+      - .env
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: lead_scoring
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -79,8 +84,41 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
     networks:
       - lead-scoring-network
+
+  # ============================================
+  # Scripts Runner (one-off commands)
+  # ============================================
+  scripts:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles: ["scripts"]
+    environment:
+      - ENVIRONMENT=development
+    env_file:
+      - .env
+    volumes:
+      - ./src:/app/src:ro
+      - ./config:/app/config:ro
+      - ./alembic:/app/alembic:ro
+      - ./alembic.ini:/app/alembic.ini:ro
+      - ./scripts:/app/scripts:ro
+      - ./models:/app/models
+      - ./data:/app/data
+      - ./backups:/app/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - lead-scoring-network
+    entrypoint: []
 
   # ============================================
   # Redis (optional, for caching - uncomment when needed)

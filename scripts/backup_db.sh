@@ -6,6 +6,7 @@ DB_HOST="${DB_HOST:-localhost}"
 DB_PORT="${DB_PORT:-5432}"
 DB_USER="${DB_USER:-postgres}"
 DB_NAME="${DB_NAME:-lead_scoring}"
+export PGPASSWORD="${DB_PASSWORD:-postgres}"
 
 BACKUP_DIR="${BACKUP_DIR:-/app/backups}"
 mkdir -p "$BACKUP_DIR"

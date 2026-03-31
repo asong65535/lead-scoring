@@ -7,6 +7,7 @@ from fastapi import Request
 
 from src.api.dependencies import get_model, get_feature_computer
 from src.api.exceptions import ModelNotLoadedError
+from src.services.features.computer import FeatureComputer
 
 
 class TestGetModel:
@@ -30,9 +31,8 @@ class TestGetModel:
 
 class TestGetFeatureComputer:
     @patch("src.api.dependencies.async_engine")
-    @patch("src.api.dependencies.FeatureComputer")
-    def test_returns_feature_computer_with_engine(self, mock_fc, mock_engine):
+    def test_returns_feature_computer_bound_to_module_engine(self, mock_engine):
         result = get_feature_computer()
 
-        mock_fc.assert_called_once_with(mock_engine)
-        assert result is mock_fc.return_value
+        assert isinstance(result, FeatureComputer)
+        assert result._engine is mock_engine

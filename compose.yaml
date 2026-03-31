@@ -101,6 +101,7 @@ services:
       context: .
       dockerfile: Dockerfile
     profiles: ["scripts"]
+    user: root
     environment:
       - ENVIRONMENT=development
       - DB_HOST=postgres

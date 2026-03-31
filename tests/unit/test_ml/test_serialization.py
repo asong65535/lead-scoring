@@ -70,13 +70,8 @@ def test_load_returns_pipeline(trained_result, tmp_path):
     assert hasattr(loaded, "predict_proba")
 
 
-def test_round_trip_identical_predictions(trained_result, tmp_path):
-    rng = np.random.RandomState(99)
-    X = pd.DataFrame([{
-        **{n: rng.random() * 10 for n in NUMERIC_FEATURES},
-        **{b: bool(rng.random() > 0.5) for b in BOOLEAN_FEATURES},
-    }])
-
+def test_round_trip_preserves_pipeline_structure(trained_result, tmp_path):
+    """Verify serialization preserves pipeline steps and feature metadata."""
     path = save_model(
         trained_result.model, "v1.0",
         trained_result.metrics, trained_result.hyperparameters,
@@ -84,6 +79,22 @@ def test_round_trip_identical_predictions(trained_result, tmp_path):
     )
     loaded = load_model(path)
 
+    # Structure check: same pipeline step names
+    original_steps = [name for name, _ in trained_result.model.steps]
+    loaded_steps = [name for name, _ in loaded.steps]
+    assert original_steps == loaded_steps
+
+    # Feature check: preprocessor learned the same feature names
+    original_features = trained_result.model["preprocessor"].get_feature_names_out().tolist()
+    loaded_features = loaded["preprocessor"].get_feature_names_out().tolist()
+    assert original_features == loaded_features
+
+    # Prediction check on fresh data — verifies end-to-end numerical fidelity
+    rng = np.random.RandomState(99)
+    X = pd.DataFrame([{
+        **{n: rng.random() * 10 for n in NUMERIC_FEATURES},
+        **{b: bool(rng.random() > 0.5) for b in BOOLEAN_FEATURES},
+    }])
     original_proba = trained_result.model.predict_proba(X)
     loaded_proba = loaded.predict_proba(X)
     np.testing.assert_array_equal(original_proba, loaded_proba)

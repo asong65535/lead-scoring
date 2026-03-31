@@ -1,8 +1,17 @@
 """End-to-end scoring flow: seed -> score -> verify DB persistence."""
 
+import sqlalchemy
 from sqlalchemy import text
 
-from src.models.prediction import Prediction
+from config.settings import get_settings
+
+
+def _sync_engine():
+    """Create a disposable sync engine for DB verification in tests."""
+    settings = get_settings()
+    return sqlalchemy.create_engine(
+        settings.database.url.replace("postgresql+asyncpg", "postgresql+psycopg2")
+    )
 
 
 class TestScoringFlowE2E:
@@ -23,22 +32,18 @@ class TestScoringFlowE2E:
         assert len(data["top_factors"]) > 0
 
         # Verify the prediction was persisted to the database
-        import sqlalchemy
-        from config.settings import get_settings
-        settings = get_settings()
-        sync_engine = sqlalchemy.create_engine(
-            settings.database.url.replace("postgresql+asyncpg", "postgresql+psycopg2")
-        )
-        with sync_engine.connect() as conn:
-            row = conn.execute(
-                text(
-                    "SELECT score, bucket, model_version, feature_snapshot, top_factors "
-                    "FROM predictions WHERE lead_id = :lid ORDER BY scored_at DESC LIMIT 1"
-                ),
-                {"lid": str(lead_id)},
-            ).fetchone()
-
-        sync_engine.dispose()
+        engine = _sync_engine()
+        try:
+            with engine.connect() as conn:
+                row = conn.execute(
+                    text(
+                        "SELECT score, bucket, model_version, feature_snapshot, top_factors "
+                        "FROM predictions WHERE lead_id = :lid ORDER BY scored_at DESC LIMIT 1"
+                    ),
+                    {"lid": str(lead_id)},
+                ).fetchone()
+        finally:
+            engine.dispose()
 
         assert row is not None, "Prediction row was not persisted"
         assert 0.0 <= row.score <= 1.0
@@ -56,18 +61,15 @@ class TestScoringFlowE2E:
         assert resp1.status_code == 200
         assert resp2.status_code == 200
 
-        import sqlalchemy
-        from config.settings import get_settings
-        settings = get_settings()
-        sync_engine = sqlalchemy.create_engine(
-            settings.database.url.replace("postgresql+asyncpg", "postgresql+psycopg2")
-        )
-        with sync_engine.connect() as conn:
-            count = conn.execute(
-                text("SELECT count(*) FROM predictions WHERE lead_id = :lid"),
-                {"lid": str(lead_id)},
-            ).scalar()
-        sync_engine.dispose()
+        engine = _sync_engine()
+        try:
+            with engine.connect() as conn:
+                count = conn.execute(
+                    text("SELECT count(*) FROM predictions WHERE lead_id = :lid"),
+                    {"lid": str(lead_id)},
+                ).scalar()
+        finally:
+            engine.dispose()
 
         assert count >= 2, f"Expected at least 2 prediction rows, got {count}"
 
@@ -81,22 +83,19 @@ class TestScoringFlowE2E:
         scored_count = len(data["results"])
         assert scored_count == 3
 
-        import sqlalchemy
-        from config.settings import get_settings
-        settings = get_settings()
-        sync_engine = sqlalchemy.create_engine(
-            settings.database.url.replace("postgresql+asyncpg", "postgresql+psycopg2")
-        )
-        placeholders = ", ".join(f":id{i}" for i in range(len(ids)))
-        with sync_engine.connect() as conn:
-            rows = conn.execute(
-                text(
-                    f"SELECT lead_id, score, bucket FROM predictions "
-                    f"WHERE lead_id::text IN ({placeholders}) ORDER BY scored_at DESC"
-                ),
-                {f"id{i}": v for i, v in enumerate(ids)},
-            ).fetchall()
-        sync_engine.dispose()
+        engine = _sync_engine()
+        try:
+            placeholders = ", ".join(f":id{i}" for i in range(len(ids)))
+            with engine.connect() as conn:
+                rows = conn.execute(
+                    text(
+                        f"SELECT lead_id, score, bucket FROM predictions "
+                        f"WHERE lead_id::text IN ({placeholders}) ORDER BY scored_at DESC"
+                    ),
+                    {f"id{i}": v for i, v in enumerate(ids)},
+                ).fetchall()
+        finally:
+            engine.dispose()
 
         assert len(rows) >= 3, f"Expected at least 3 prediction rows, got {len(rows)}"
         # Verify each scored lead has a prediction

@@ -78,6 +78,17 @@ class ScoringService:
         return "D"
 
     @staticmethod
+    def _to_python(val: Any) -> Any:
+        """Convert numpy scalar types to native Python for JSON serialisation."""
+        if isinstance(val, (np.integer,)):
+            return int(val)
+        if isinstance(val, (np.floating,)):
+            return float(val)
+        if isinstance(val, np.bool_):
+            return bool(val)
+        return val
+
+    @staticmethod
     def top_factors(
         feature_names: list[str],
         importances: np.ndarray,
@@ -93,7 +104,7 @@ class ScoringService:
             {
                 "feature": name,
                 "impact": float(imp),
-                "value": feature_values.get(name),
+                "value": ScoringService._to_python(feature_values.get(name)),
             }
             for name, imp in paired[:n]
         ]
@@ -122,7 +133,7 @@ class ScoringService:
             factors = self.top_factors(feature_names, importances, features)
         scored_at = datetime.now(timezone.utc)
 
-        snapshot = {k: features[k] for k in feature_names}
+        snapshot = {k: self._to_python(features[k]) for k in feature_names}
         pred = Prediction(
             lead_id=lead_id,
             score=proba,
@@ -188,7 +199,7 @@ class ScoringService:
                     factors = self._explainer.explain(df)
                 else:
                     factors = self.top_factors(feature_names, importances, feat_dict)
-                snapshot = {k: feat_dict[k] for k in feature_names}
+                snapshot = {k: self._to_python(feat_dict[k]) for k in feature_names}
 
                 pred = Prediction(
                     lead_id=lid,

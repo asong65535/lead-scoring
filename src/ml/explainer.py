@@ -60,11 +60,14 @@ class Explainer:
             key=lambda x: abs(x[1]),
             reverse=True,
         )
+        def _to_python(v: Any) -> Any:
+            return v.item() if hasattr(v, "item") else v
+
         return [
             {
                 "feature": name,
                 "impact": float(val),
-                "value": feature_values.get(name),
+                "value": _to_python(feature_values.get(name)),
             }
             for name, val in paired[:n]
         ]

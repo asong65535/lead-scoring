@@ -34,6 +34,7 @@ services:
     environment:
       - ENVIRONMENT=development
       - DEBUG=true
+      - DB_HOST=postgres
     env_file:
       - .env
     volumes:
@@ -102,6 +103,7 @@ services:
     profiles: ["scripts"]
     environment:
       - ENVIRONMENT=development
+      - DB_HOST=postgres
     env_file:
       - .env
     volumes:

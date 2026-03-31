@@ -88,3 +88,6 @@ dmypy.json
 # llm
 .claude/
 docs/superpowers/
+
+# backups
+backups/

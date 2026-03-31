@@ -67,6 +67,15 @@ class TestScoreSingle:
 
         assert resp.status_code == 404
 
+    def test_500_on_unexpected_service_error(self):
+        svc = AsyncMock()
+        svc.score_lead.side_effect = RuntimeError("connection pool exhausted")
+
+        client = TestClient(_make_app(svc), raise_server_exceptions=False)
+        resp = client.post(f"/score/{uuid4()}")
+
+        assert resp.status_code == 500
+
 
 class TestScoreBatch:
     def test_returns_results_and_errors(self):

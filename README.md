@@ -24,58 +24,53 @@ flowchart LR
 
 ## Quick Start
 
-**Prerequisites:** Docker, Docker Compose, Python 3.13+, Poetry
+**Prerequisites:** Docker, Docker Compose, Make
 
-**Step 1 — Clone and install**
+**Option 1 — One command (recommended)**
+
 ```bash
-git clone https://github.com/asong65535/lead-scoring.git lead-scoring
-cd lead-scoring
-poetry install
+git clone <repo-url> lead-scoring && cd lead-scoring
+cp .env.example .env
+make bootstrap
 ```
 
-**Step 2 — Start the database**
+This builds containers, runs migrations, seeds the database, generates synthetic events, trains the model, and starts the full stack. Takes 2–5 minutes.
+
+**Option 2 — Step by step**
+
 ```bash
-docker compose up postgres -d
+cp .env.example .env
+docker compose up -d postgres          # start database
+docker compose run --rm scripts alembic upgrade head  # migrations
+docker compose run --rm scripts python scripts/seed_db.py
+docker compose run --rm scripts python scripts/generate_events.py
+docker compose run --rm scripts python scripts/train.py --set-active
+docker compose up -d                   # start app + nginx
 ```
 
-**Step 3 — Run migrations**
+**Create an API key**
+
 ```bash
-poetry run alembic upgrade head
+docker compose run --rm scripts python scripts/manage_keys.py create --name dev
 ```
 
-**Step 4 — Download dataset**
+Save the printed key — it cannot be recovered.
 
-Download the [Kaggle Lead Scoring dataset](https://www.kaggle.com/datasets/amritachatterjee09/lead-scoring-dataset/data) and place the CSV at:
-```
-data/Lead Scoring.csv
-```
+**Test it**
 
-**Step 5 — Seed the database**
 ```bash
-poetry run python scripts/seed_db.py
+# Get a lead ID
+docker compose exec postgres psql -U postgres -d lead_scoring \
+  -t -c "SELECT id FROM leads LIMIT 1"
+
+# Score it (replace <key> and <lead-id>)
+curl -X POST http://localhost/score/<lead-id> \
+  -H "Authorization: Bearer <key>"
 ```
 
-**Step 6 — Generate events**
-```bash
-poetry run python scripts/generate_events.py
-```
+The API is available at **http://localhost** (port 80, Nginx reverse proxy).
 
-**Step 7 — Train the model**
-```bash
-poetry run python scripts/train.py --set-active
-```
-
-**Step 8 — Start the API**
-```bash
-poetry run uvicorn src.api.main:app --port 8000
-```
-
-**Step 9 — Test it**
-```bash
-curl -X POST http://localhost:8000/score/{lead_id}
-```
-
-> **Note:** The ML application runs on your machine; only the database runs in a container. To run everything in containers instead, use `docker compose up`.
+> **Without Docker:** You can run the app directly with Poetry — see [Deployment](docs/deployment.md) for the host-based workflow.
 
 ## Project Structure
 
@@ -108,6 +103,7 @@ lead-scoring/
 - [Configuration](docs/configuration.md) — environment variables, YAML configs
 - [Database](docs/database.md) — schema, migrations, connection management
 - [Deployment](docs/deployment.md) — containers, local dev, production architecture
+- [Operational Runbook](docs/runbook.md) — health checks, troubleshooting, rollback, backup/restore
 
 ## Tech Stack
 

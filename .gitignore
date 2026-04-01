@@ -53,6 +53,7 @@ ENV/
 *.joblib
 models/*.joblib
 models/*.pkl
+models/*.json
 !models/.gitkeep
 
 # Data files

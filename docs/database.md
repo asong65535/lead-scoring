@@ -271,8 +271,6 @@ Source: `src/models/crm_sync_log.py`
 | `ix_crm_sync_log_status` | `status` |
 | `ix_crm_sync_log_source_external` | `source_system`, `external_id` |
 
-> **Note:** This table has no active write paths yet. It is prepared for Phase 7 CRM integration.
-
 ---
 
 ### `retraining_runs`

@@ -68,7 +68,7 @@ curl -X POST http://localhost/score/<lead-id> \
   -H "Authorization: Bearer <key>"
 ```
 
-The API is available at **http://localhost** (port 80, Nginx reverse proxy).
+The API is available at **http://localhost:80** (port 80, Nginx reverse proxy).
 
 > **Without Docker:** You can run the app directly with Poetry — see [Deployment](docs/deployment.md) for the host-based workflow.
 

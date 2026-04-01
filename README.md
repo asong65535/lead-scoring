@@ -29,7 +29,7 @@ flowchart LR
 **Option 1 — One command (recommended)**
 
 ```bash
-git clone <repo-url> lead-scoring && cd lead-scoring
+git clone https://github.com/asong65535/lead-scoring.git lead-scoring && cd lead-scoring
 cp .env.example .env
 make bootstrap
 ```

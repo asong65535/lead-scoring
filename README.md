@@ -69,7 +69,7 @@ curl -X POST http://localhost/score/<lead-id> \
   -H "Authorization: Bearer <key>"
 ```
 
-The API is available at **http://localhost:80**
+The API is available at **http://localhost** (port 80, Nginx reverse proxy).
 
 > **Without Docker:** You can run the app directly with Poetry — see [Deployment](docs/deployment.md) for the host-based workflow.
 
@@ -78,20 +78,24 @@ The API is available at **http://localhost:80**
 ```
 lead-scoring/
 ├── src/
-│   ├── api/          # FastAPI application
-│   ├── ml/           # ML training pipeline
+│   ├── api/          # FastAPI application, middleware, routes
+│   ├── ml/           # ML training, evaluation, SHAP explainability
 │   ├── models/       # SQLAlchemy ORM models
-│   └── services/     # Business logic (scoring, features, ingestion, CRM sync)
-├── config/           # Settings and YAML configs
-├── scripts/          # CLI tools (seed, train, generate events)
-├── tests/            # Unit and integration tests
+│   └── services/     # Scoring, features, ingestion, CRM sync
+├── config/           # Pydantic settings, features.yaml, crm.yaml, nginx.conf
+├── scripts/          # CLI tools (seed, train, retrain, batch score, backup)
+├── tests/            # Unit, integration, and e2e tests
 ├── alembic/          # Database migrations
-├── models/           # Trained model artifacts
-├── data/             # Dataset files
+├── models/           # Trained model artifacts (.joblib)
+├── data/             # Kaggle dataset CSV
+├── backups/          # Database backup dumps
 ├── notebooks/        # Exploration notebooks
-├── docs/             # Technical documentation
-├── compose.yaml      # Docker Compose config
-└── Dockerfile        # Container build
+├── docs/             # Technical documentation and runbook
+├── Makefile          # Bootstrap and operational targets
+├── compose.yaml      # Docker Compose (nginx, app, postgres, scripts)
+├── Dockerfile        # Multi-stage container build
+├── pyproject.toml    # Dependencies and project metadata
+└── .env.example      # Environment variable template
 ```
 
 ## Documentation
@@ -113,8 +117,10 @@ lead-scoring/
 | Language | Python 3.13 |
 | API Framework | FastAPI |
 | ML Model | XGBoost (scikit-learn pipeline) |
+| Explainability | SHAP (TreeExplainer) |
 | Database | PostgreSQL 15 |
 | ORM | SQLAlchemy 2.0 (async) |
 | Migrations | Alembic |
+| Reverse Proxy | Nginx |
 | Containerization | Docker, Docker Compose |
 | Logging | structlog |

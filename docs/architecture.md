@@ -267,3 +267,9 @@ Step-by-step walkthrough of `POST /score/{lead_id}`:
 - **Fault-tolerant feature computation** — individual feature function failures are caught and logged; the validation layer fills in YAML defaults for missing features, so a single bad feature doesn't block scoring.
 - **Three DI scopes** — application-state (model, loaded once at startup), engine-scoped (`FeatureComputer`, one per request but sharing the module-level engine), and per-request (`AsyncSession`, created and closed for each request via `get_session`).
 - **SHAP TreeExplainer** — the `Explainer` wraps SHAP's `TreeExplainer` for per-prediction feature contributions. Instantiated once at startup alongside the model (and refreshed on model reload). TreeExplainer uses the XGBoost tree structure directly, making it fast enough for real-time scoring without approximation.
+
+---
+
+## Operational Reference
+
+For day-to-day operations (health checks, troubleshooting, model rollback, backup/restore), see the [Operational Runbook](runbook.md).

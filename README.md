@@ -2,6 +2,30 @@
 
 An automated system that analyzes lead behavior to predict which prospects are most likely to convert, helping sales teams prioritize their outreach.
 
+## Key Features
+
+- Automated lead scoring based on behavioral signals
+- REST API for real-time single and batch scoring
+- A/B/C/D bucket classification for sales prioritization
+- Prediction logging with explainability (top contributing factors)
+- Hot-reloadable model without server restart
+- Bidirectional HubSpot CRM integration with webhook-triggered rescoring
+
+## Tech Stack
+
+| Component | Technology |
+|---|---|
+| Language | Python 3.13 |
+| API Framework | FastAPI |
+| ML Model | XGBoost (scikit-learn pipeline) |
+| Explainability | SHAP (TreeExplainer) |
+| Database | PostgreSQL 15 |
+| ORM | SQLAlchemy 2.0 (async) |
+| Migrations | Alembic |
+| Reverse Proxy | Nginx |
+| Containerization | Docker, Docker Compose |
+| Logging | structlog |
+
 ## System Diagram
 
 ```mermaid
@@ -13,14 +37,42 @@ flowchart LR
     E --> F[Lead Score\nA / B / C / D]
 ```
 
-## Key Features
+## Documentation
 
-- Automated lead scoring based on behavioral signals
-- REST API for real-time single and batch scoring
-- A/B/C/D bucket classification for sales prioritization
-- Prediction logging with explainability (top contributing factors)
-- Hot-reloadable model without server restart
-- Bidirectional HubSpot CRM integration with webhook-triggered rescoring
+- [Architecture](docs/architecture.md) — system design, component responsibilities, request lifecycle
+- [Data Pipeline](docs/data-pipeline.md) — raw data source, cleaning, database ingestion
+- [ML Model](docs/ml-model.md) — feature engineering, training, evaluation, serialization
+- [API Reference](docs/api.md) — endpoints, middleware, error handling
+- [CRM Integration](docs/crm-integration.md) — HubSpot sync, webhooks, field mapping, retry logic
+- [Configuration](docs/configuration.md) — environment variables, YAML configs
+- [Database](docs/database.md) — schema, migrations, connection management
+- [Deployment](docs/deployment.md) — containers, local dev, production architecture
+- [Operational Runbook](docs/runbook.md) — health checks, troubleshooting, rollback, backup/restore
+
+## Project Structure
+
+```
+lead-scoring/
+├── src/
+│   ├── api/          # FastAPI application, middleware, routes
+│   ├── ml/           # ML training, evaluation, SHAP explainability
+│   ├── models/       # SQLAlchemy ORM models
+│   └── services/     # Scoring, features, ingestion, CRM sync
+├── config/           # Pydantic settings, features.yaml, crm.yaml, nginx.conf
+├── scripts/          # CLI tools (seed, train, retrain, batch score, backup)
+├── tests/            # Unit, integration, and e2e tests
+├── alembic/          # Database migrations
+├── models/           # Trained model artifacts (.joblib)
+├── data/             # Kaggle dataset CSV
+├── backups/          # Database backup dumps
+├── notebooks/        # Exploration notebooks
+├── docs/             # Technical documentation and runbook
+├── Makefile          # Bootstrap and operational targets
+├── compose.yaml      # Docker Compose (nginx, app, postgres, scripts)
+├── Dockerfile        # Multi-stage container build
+├── pyproject.toml    # Dependencies and project metadata
+└── .env.example      # Environment variable template
+```
 
 ## Quick Start
 
@@ -70,57 +122,3 @@ curl -X POST http://localhost/score/<lead-id> \
 ```
 
 The API is available at **http://localhost** (port 80, Nginx reverse proxy).
-
-> **Without Docker:** You can run the app directly with Poetry — see [Deployment](docs/deployment.md) for the host-based workflow.
-
-## Project Structure
-
-```
-lead-scoring/
-├── src/
-│   ├── api/          # FastAPI application, middleware, routes
-│   ├── ml/           # ML training, evaluation, SHAP explainability
-│   ├── models/       # SQLAlchemy ORM models
-│   └── services/     # Scoring, features, ingestion, CRM sync
-├── config/           # Pydantic settings, features.yaml, crm.yaml, nginx.conf
-├── scripts/          # CLI tools (seed, train, retrain, batch score, backup)
-├── tests/            # Unit, integration, and e2e tests
-├── alembic/          # Database migrations
-├── models/           # Trained model artifacts (.joblib)
-├── data/             # Kaggle dataset CSV
-├── backups/          # Database backup dumps
-├── notebooks/        # Exploration notebooks
-├── docs/             # Technical documentation and runbook
-├── Makefile          # Bootstrap and operational targets
-├── compose.yaml      # Docker Compose (nginx, app, postgres, scripts)
-├── Dockerfile        # Multi-stage container build
-├── pyproject.toml    # Dependencies and project metadata
-└── .env.example      # Environment variable template
-```
-
-## Documentation
-
-- [Architecture](docs/architecture.md) — system design, component responsibilities, request lifecycle
-- [Data Pipeline](docs/data-pipeline.md) — raw data source, cleaning, database ingestion
-- [ML Model](docs/ml-model.md) — feature engineering, training, evaluation, serialization
-- [API Reference](docs/api.md) — endpoints, middleware, error handling
-- [CRM Integration](docs/crm-integration.md) — HubSpot sync, webhooks, field mapping, retry logic
-- [Configuration](docs/configuration.md) — environment variables, YAML configs
-- [Database](docs/database.md) — schema, migrations, connection management
-- [Deployment](docs/deployment.md) — containers, local dev, production architecture
-- [Operational Runbook](docs/runbook.md) — health checks, troubleshooting, rollback, backup/restore
-
-## Tech Stack
-
-| Component | Technology |
-|---|---|
-| Language | Python 3.13 |
-| API Framework | FastAPI |
-| ML Model | XGBoost (scikit-learn pipeline) |
-| Explainability | SHAP (TreeExplainer) |
-| Database | PostgreSQL 15 |
-| ORM | SQLAlchemy 2.0 (async) |
-| Migrations | Alembic |
-| Reverse Proxy | Nginx |
-| Containerization | Docker, Docker Compose |
-| Logging | structlog |

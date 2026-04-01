@@ -56,8 +56,6 @@ models/*.pkl
 !models/.gitkeep
 
 # Data files
-data/*
-!data/.gitkeep
 *.csv
 !tests/fixtures/*.csv
 *.parquet
@@ -90,4 +88,5 @@ dmypy.json
 docs/superpowers/
 
 # backups
-backups/
+backups/*
+!backups/.gitkeep

@@ -26,29 +26,30 @@ flowchart LR
 
 **Prerequisites:** Docker, Docker Compose, Make
 
-**Option 1 — One command (recommended)**
+**Step 1 — Clone and configure**
 
 ```bash
 git clone https://github.com/asong65535/lead-scoring.git lead-scoring && cd lead-scoring
 cp .env.example .env
+```
+
+**Step 2 — Download the dataset**
+
+Download the [Kaggle Lead Scoring dataset](https://www.kaggle.com/datasets/amritachatterjee09/lead-scoring-dataset/data) and place the CSV at:
+
+```
+data/Lead Scoring.csv
+```
+
+**Step 3 — Bootstrap**
+
+```bash
 make bootstrap
 ```
 
 This builds containers, runs migrations, seeds the database, generates synthetic events, trains the model, and starts the full stack. Takes 2–5 minutes.
 
-**Option 2 — Step by step**
-
-```bash
-cp .env.example .env
-docker compose up -d postgres          # start database
-docker compose run --rm scripts alembic upgrade head  # migrations
-docker compose run --rm scripts python scripts/seed_db.py
-docker compose run --rm scripts python scripts/generate_events.py
-docker compose run --rm scripts python scripts/train.py --set-active
-docker compose up -d                   # start app + nginx
-```
-
-**Create an API key**
+**Step 4 — Create an API key**
 
 ```bash
 docker compose run --rm scripts python scripts/manage_keys.py create --name dev
@@ -56,7 +57,7 @@ docker compose run --rm scripts python scripts/manage_keys.py create --name dev
 
 Save the printed key — it cannot be recovered.
 
-**Test it**
+**Step 5 — Test it**
 
 ```bash
 # Get a lead ID

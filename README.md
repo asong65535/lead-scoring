@@ -2,6 +2,8 @@
 
 An automated system that analyzes lead behavior to predict which prospects are most likely to convert, helping sales teams prioritize their outreach.
 
+[Documentation Website](http://asong65335.me/lead-scoring/)
+
 ## Key Features
 
 - Automated lead scoring based on behavioral signals
@@ -36,18 +38,6 @@ flowchart LR
     D --> E[REST API]
     E --> F[Lead Score\nA / B / C / D]
 ```
-
-## Documentation
-
-- [Architecture](docs/architecture.md) — system design, component responsibilities, request lifecycle
-- [Data Pipeline](docs/data-pipeline.md) — raw data source, cleaning, database ingestion
-- [ML Model](docs/ml-model.md) — feature engineering, training, evaluation, serialization
-- [API Reference](docs/api.md) — endpoints, middleware, error handling
-- [CRM Integration](docs/crm-integration.md) — HubSpot sync, webhooks, field mapping, retry logic
-- [Configuration](docs/configuration.md) — environment variables, YAML configs
-- [Database](docs/database.md) — schema, migrations, connection management
-- [Deployment](docs/deployment.md) — containers, local dev, production architecture
-- [Operational Runbook](docs/runbook.md) — health checks, troubleshooting, rollback, backup/restore
 
 ## Project Structure
 

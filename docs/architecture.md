@@ -8,100 +8,124 @@ The lead scoring system ingests lead data from a Kaggle CSV, computes behavioral
 
 ## System Diagram
 
+### High-Level Data Flow
+
 ```mermaid
-flowchart TD
+flowchart TB
+    subgraph Input
+        csv[Kaggle CSV]
+    end
+
+    subgraph Database
+        leads[(leads)]
+        events[(events)]
+        predictions[(predictions)]
+        registry[(model_registry)]
+    end
+
+    subgraph Processing
+        ingestion[Data Ingestion]
+        features[Feature Engine]
+        training[ML Training]
+    end
+
+    subgraph Serving
+        api[REST API]
+        scoring[Scoring Service]
+    end
+
+    subgraph External
+        hubspot[HubSpot CRM]
+    end
+
+    csv --> ingestion --> leads
+    leads --> features
+    events --> features
+    features --> training --> registry
+    
+    api --> scoring
+    scoring --> features
+    features --> predictions
+    scoring --> hubspot
+    hubspot -->|webhooks| api
+```
+
+### Request Flow
+
+```mermaid
+flowchart TB
+    client[Client Request]
+    
+    subgraph Middleware
+        auth[Auth]
+        rate[Rate Limit]
+        reqid[Request ID]
+        log[Logging]
+    end
+    
+    subgraph Handler
+        routes[Routes]
+        deps[Dependencies]
+    end
+    
+    subgraph Services
+        scoring[ScoringService]
+        features[FeatureComputer]
+        explainer[SHAP Explainer]
+    end
+    
+    subgraph Data
+        db[(PostgreSQL)]
+        model[XGBoost Model]
+    end
+
+    client --> auth --> rate --> reqid --> log --> routes
+    routes --> deps --> scoring
+    scoring --> features --> db
+    scoring --> model
+    scoring --> explainer
+    scoring --> db
+```
+
+### Training Pipeline
+
+```mermaid
+flowchart TB
     subgraph Scripts
-        seed["scripts/seed_db.py\n(CSV → leads table)"]
-        gentevents["scripts/generate_events.py\n(synthetic events → events table)"]
-        train["scripts/train.py\n(build dataset → train → register)"]
-        batchscore["scripts/batch_score.py\n(nightly batch scoring)"]
-        batchretrain["scripts/retrain.py\n(weekly retrain + compare + promote)"]
+        seed[seed_db.py]
+        genevents[generate_events.py]
+        train[train.py]
+        retrain[retrain.py]
     end
 
-    subgraph ML["ML Layer (src/ml/)"]
-        dataset["dataset.py\nbuild_training_dataset()"]
-        preproc["preprocessing.py\nbuild_preprocessing_pipeline()"]
-        trainer["trainer.py\ntrain_model()"]
-        tuning["tuning.py\ntune_hyperparameters()"]
-        serial["serialization.py\nsave_model() / register_model()"]
-        explainer["explainer.py\nExplainer (SHAP TreeExplainer)"]
+    subgraph ML Layer
+        dataset[Dataset Builder]
+        preprocess[Preprocessor]
+        tuning[Hyperparameter Tuning]
+        trainer[Trainer]
+        serializer[Serializer]
     end
 
-    subgraph Services["Service Layer (src/services/)"]
-        ingestion["ingestion.py\nclean_dataframe()\nvalidate_required_fields()"]
-        featcomp["features/computer.py\nFeatureComputer"]
-        featdefs["features/definitions/\nrecency, frequency, intensity\nintent, engagement, firmographic"]
-        scoring["scoring.py\nScoringService"]
+    subgraph Storage
+        leads[(leads)]
+        events[(events)]
+        registry[(model_registry)]
+        artifacts[models/*.joblib]
     end
 
-    subgraph API["API Layer (src/api/)"]
-        mw_rid["RequestIDMiddleware"]
-        mw_log["LoggingMiddleware"]
-        mw_rl["RateLimitMiddleware"]
-        mw_auth["AuthMiddleware"]
-        routes["routes/\nhealth, scoring, webhooks, admin"]
-        di["dependencies.py\nget_model() / get_feature_computer()\nget_scoring_service()"]
-    end
-
-    subgraph DB["PostgreSQL"]
-        leads[("leads")]
-        events[("events")]
-        predictions[("predictions")]
-        registry[("model_registry")]
-        crmsync[("crm_sync_log")]
-        apikeys[("api_keys")]
-        retraining_runs[("retraining_runs")]
-    end
-
-    seed -->|"clean + batch insert\non_conflict_do_nothing"| ingestion
-    ingestion --> leads
-    gentevents --> events
-
+    seed --> leads
+    genevents --> events
+    
     train --> dataset
-    dataset -->|"joins leads + features"| leads
-    dataset -->|"joins events"| events
-    train --> preproc
-    train --> tuning
-    train --> trainer
-    trainer --> serial
-    serial -->|"artifact (.joblib)"| registry
-
-    routes --> di
-    di -->|"app.state.model"| mw_rid
-    di --> scoring
-    scoring --> featcomp
-    featcomp --> featdefs
-    featcomp -->|"SELECT leads + events"| leads
-    featcomp -->|"SELECT events"| events
-    scoring -->|"INSERT prediction"| predictions
-    scoring -->|"per-sample SHAP"| explainer
-    batchscore --> scoring
-
-    subgraph CRM["CRM Layer (src/services/crm/)"]
-        crmsvc["sync.py\nCRMSyncService"]
-        crmclient["hubspot.py\nHubSpotClient"]
-        crmretry["retry.py\nRetryService"]
-    end
-
-    batchretrain --> dataset
-    batchretrain --> train
-    batchretrain --> serial
-    batchretrain -->|"drift detection"| predictions
-    batchretrain -->|"INSERT run"| retraining_runs
-
-    scoring -->|"fire-and-forget\nwriteback"| crmsvc
-    crmsvc --> crmclient
-    crmclient -->|"push_score()"| HubSpot["HubSpot API"]
-    crmretry -->|"retry failed rows"| crmsvc
-    crmsvc -->|"INSERT/UPDATE"| crmsync
-    HubSpot -->|"webhooks"| routes
-    routes -->|"rescore"| scoring
-
-    mw_auth --> mw_rl
-    mw_rl --> mw_rid
-    mw_rid --> mw_log
-    mw_log --> routes
-    mw_auth -->|"validate key hash"| apikeys
+    dataset --> leads
+    dataset --> events
+    dataset --> preprocess --> tuning --> trainer --> serializer
+    serializer --> artifacts
+    serializer --> registry
+    
+    retrain --> dataset
+    retrain --> trainer
+    retrain -->|compare & promote| registry
 ```
 
 ---

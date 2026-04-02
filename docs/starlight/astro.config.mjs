@@ -6,7 +6,15 @@ export default defineConfig({
   site: "https://asong65535.github.io",
   base: "/lead-scoring",
   markdown: {
-    rehypePlugins: [rehypeMermaid],
+    rehypePlugins: [
+      [
+        rehypeMermaid,
+        {
+          strategy: "img-svg",
+          dark: true,
+        },
+      ],
+    ],
   },
   integrations: [
     starlight({

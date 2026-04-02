@@ -10,113 +10,60 @@ Six tables are defined. `leads`, `events`, `predictions`, `model_registry`, and 
 erDiagram
     leads {
         uuid id PK
-        timestamptz created_at
-        timestamptz updated_at
-        varchar(50) external_id "UNIQUE NOT NULL"
-        varchar(20) source_system "NOT NULL"
-        varchar(50) lead_origin
-        varchar(100) lead_source
-        varchar(100) country
-        varchar(100) city
-        varchar(100) current_occupation
-        varchar(100) specialization
-        boolean do_not_email "DEFAULT false"
-        boolean do_not_call "DEFAULT false"
-        float total_visits
-        float total_time_spent
-        float page_views_per_visit
-        varchar(100) last_activity
-        varchar(200) tags
+        varchar external_id UK
+        varchar source_system
         boolean converted
-        timestamptz converted_at
     }
 
     events {
         uuid id PK
-        timestamptz created_at
-        timestamptz updated_at
-        uuid lead_id FK "NOT NULL"
-        varchar(30) event_type "NOT NULL"
-        varchar(100) event_name
-        jsonb properties
-        timestamptz occurred_at "NOT NULL"
+        uuid lead_id FK
+        varchar event_type
+        timestamptz occurred_at
     }
 
     predictions {
         uuid id PK
-        timestamptz created_at
-        timestamptz updated_at
-        uuid lead_id FK "NOT NULL"
-        float score "NOT NULL"
-        varchar(10) bucket "NOT NULL"
-        varchar(20) model_version "NOT NULL"
-        jsonb feature_snapshot
-        jsonb top_factors
-        timestamptz scored_at "NOT NULL DEFAULT now()"
+        uuid lead_id FK
+        float score
+        varchar bucket
+        varchar model_version
     }
 
     model_registry {
         uuid id PK
-        timestamptz created_at
-        timestamptz updated_at
-        varchar(20) version "UNIQUE NOT NULL"
-        varchar(500) artifact_path "NOT NULL"
-        jsonb metrics
-        jsonb hyperparameters
-        jsonb feature_columns
-        boolean is_active "DEFAULT false"
-        timestamptz trained_at "NOT NULL"
+        varchar version UK
+        varchar artifact_path
+        boolean is_active
     }
 
     crm_sync_log {
         uuid id PK
-        timestamptz created_at
-        timestamptz updated_at
-        uuid lead_id FK "NOT NULL"
-        varchar(20) source_system "NOT NULL"
-        varchar(100) external_id
-        varchar(50) action "NOT NULL"
-        jsonb payload
-        varchar(20) status "NOT NULL DEFAULT pending"
-        text error_message
-        timestamptz synced_at
+        uuid lead_id FK
+        varchar action
+        varchar status
     }
 
     api_keys {
         uuid id PK
-        varchar(64) key_hash "UNIQUE NOT NULL"
-        varchar(255) label "NOT NULL"
-        boolean is_active "DEFAULT true"
-        timestamptz created_at
+        varchar key_hash UK
+        varchar label
+        boolean is_active
     }
 
     retraining_runs {
         uuid id PK
-        timestamptz created_at
-        timestamptz updated_at
-        varchar(20) run_status "NOT NULL"
-        varchar(20) candidate_version "NOT NULL"
-        varchar(20) active_version_before
-        boolean promoted "NOT NULL"
-        jsonb current_metrics
-        jsonb candidate_metrics
-        jsonb metric_deltas
-        text comparison_reason
-        jsonb drift_result
-        jsonb feature_baselines
-        jsonb training_data_stats
-        jsonb hyperparameters
-        varchar(20) triggered_by "NOT NULL"
-        float duration_seconds
-        text error_message
-        timestamptz started_at "NOT NULL"
-        timestamptz completed_at
+        varchar run_status
+        varchar candidate_version
+        boolean promoted
     }
 
-    leads ||--o{ events : "CASCADE delete"
-    leads ||--o{ predictions : "RESTRICT delete"
-    leads ||--o{ crm_sync_log : "RESTRICT delete"
+    leads ||--o{ events : has
+    leads ||--o{ predictions : has
+    leads ||--o{ crm_sync_log : has
 ```
+
+See detailed column definitions in the [Tables](#tables) section below.
 
 > **TimestampMixin** (`src/models/base.py`): every table gets `id` (UUID PK, `gen_random_uuid()`), `created_at` (timestamptz, `now()`), and `updated_at` (timestamptz, `now()`, updated on each write via `onupdate`).
 

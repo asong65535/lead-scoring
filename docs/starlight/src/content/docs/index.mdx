@@ -1,0 +1,53 @@
+---
+title: ML Lead Scoring System
+description: An automated system that analyzes lead behavior to predict which prospects are most likely to convert.
+template: splash
+hero:
+  tagline: Analyze lead behavior to predict which prospects are most likely to convert, helping sales teams prioritize their outreach.
+  actions:
+    - text: Get Started
+      link: /lead-scoring/architecture/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/asong65535/lead-scoring
+      variant: minimal
+      icon: external
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+## Key Features
+
+<CardGrid>
+  <Card title="Behavioral Scoring" icon="star">
+    Automated lead scoring based on behavioral signals like page views, email
+    clicks, and form submissions.
+  </Card>
+  <Card title="Real-Time API" icon="rocket">
+    REST API for real-time single and batch scoring with A/B/C/D bucket
+    classification.
+  </Card>
+  <Card title="Explainability" icon="information">
+    SHAP-powered prediction logging showing top contributing factors for each
+    score.
+  </Card>
+  <Card title="CRM Integration" icon="puzzle">
+    Bidirectional HubSpot sync with webhook-triggered rescoring when lead
+    properties change.
+  </Card>
+</CardGrid>
+
+## Tech Stack
+
+| Component        | Technology                      |
+| ---------------- | ------------------------------- |
+| Language         | Python 3.13                     |
+| API Framework    | FastAPI                         |
+| ML Model         | XGBoost (scikit-learn pipeline) |
+| Explainability   | SHAP (TreeExplainer)            |
+| Database         | PostgreSQL 15                   |
+| ORM              | SQLAlchemy 2.0 (async)          |
+| Migrations       | Alembic                         |
+| Reverse Proxy    | Nginx                           |
+| Containerization | Docker, Docker Compose          |
+| Logging          | structlog                       |

@@ -6,19 +6,42 @@ export default defineConfig({
   site: "https://asong65535.github.io",
   base: "/lead-scoring",
   markdown: {
-    rehypePlugins: [
-      [
-        rehypeMermaid,
-        {
-          strategy: "img-svg",
-          dark: true,
-        },
-      ],
-    ],
+    syntaxHighlight: {
+      excludeLangs: ["mermaid"]
+    },
+    rehypePlugins: [[rehypeMermaid, { strategy: "img-svg", dark: true}]]
   },
   integrations: [
     starlight({
       title: "Lead Scoring",
+      head: [
+        {
+          tag: "script",
+          content: `
+            (function() {
+              function syncMermaidTheme() {
+                const isDark = document.documentElement.dataset.theme === 'dark';
+                document.querySelectorAll('picture').forEach(picture => {
+                  const darkSource = picture.querySelector('source[media="(prefers-color-scheme: dark)"]');
+                  const img = picture.querySelector('img');
+                  if (!darkSource || !img) return;
+                  if (!img.dataset.lightSrc) {
+                    img.dataset.lightSrc = img.src;
+                    img.dataset.darkSrc = darkSource.srcset;
+                  }
+                  img.src = isDark ? img.dataset.darkSrc : img.dataset.lightSrc;
+                });
+              }
+              if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', syncMermaidTheme);
+              } else {
+                syncMermaidTheme();
+              }
+              new MutationObserver(() => syncMermaidTheme()).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+            })();
+          `,
+        },
+      ],
       social: [
         {
           icon: "github",

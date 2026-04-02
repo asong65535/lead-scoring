@@ -1,12 +1,12 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
-import remarkMermaid from "remark-mermaidjs";
+import rehypeMermaid from "rehype-mermaid";
 
 export default defineConfig({
   site: "https://asong65535.github.io",
   base: "/lead-scoring",
   markdown: {
-    remarkPlugins: [remarkMermaid],
+    rehypePlugins: [rehypeMermaid],
   },
   integrations: [
     starlight({

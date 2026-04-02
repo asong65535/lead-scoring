@@ -1,0 +1,451 @@
+---
+title: API Reference
+description: FastAPI endpoints, middleware stack, error handling, and authentication.
+---
+
+## Overview
+
+The Lead Scoring API is a FastAPI application created via `create_app()` in `src/api/main.py`.
+
+### Startup (lifespan)
+
+On startup, the lifespan context manager:
+
+1. Calls `configure_logging(debug=settings.debug)` to initialise structlog.
+2. Queries the `model_registry` table for the row where `is_active = true`.
+3. If found and the artifact file exists, loads the model via `load_model()` and stores it in `app.state.model` / `app.state.model_version`. Also creates an `Explainer(model)` for per-prediction SHAP explanations and stores it in `app.state.explainer`.
+4. If no active model exists or the artifact is missing, sets model, version, and explainer to `None` and logs a warning. Scoring endpoints will return 503 until a model is loaded.
+5. Initialises the CRM client via `get_crm_client(settings)` and stores it in `app.state.crm_client`. Logs `crm_client_initialized` if a client is created; the client is `None` when `CRM_TYPE=none`.
+6. On shutdown, calls `crm_client.close()` (if present) and disposes the async database engine.
+
+### Running the server
+
+```
+uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+```
+
+Default port: **8000**.
+
+### OpenAPI docs
+
+Interactive docs are available only when `DEBUG=true`:
+
+- Swagger UI: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
+
+In production (`DEBUG=false`) both URLs return 404.
+
+### Authentication
+
+All endpoints require a valid API key passed as a Bearer token in the `Authorization` header, except paths listed in `AUTH_EXEMPT_PATHS` (default: `/health/live`, `/health/ready`, `/docs`, `/redoc`, `/openapi.json`). Authentication can be disabled entirely by setting `AUTH_ENABLED=false`.
+
+**Request header:**
+
+```
+Authorization: Bearer <api-key>
+```
+
+Keys are managed via the CLI tool `scripts/manage_keys.py` — see [Deployment](deployment.md) for details. Only the SHA-256 hash is stored in the database; raw keys cannot be recovered.
+
+**Error responses:**
+
+| Condition | Status | Body |
+|-----------|--------|------|
+| Missing or malformed header | 401 | `{"detail": "Missing or invalid Authorization header"}` |
+| Invalid or revoked key | 401 | `{"detail": "Invalid API key"}` |
+
+### Rate Limiting
+
+An in-memory sliding-window rate limiter enforces per-IP request limits. Default: **100 requests per 60 seconds**. When exceeded, the API returns `429 Too Many Requests`.
+
+| Setting | Default |
+|---------|---------|
+| `RATE_LIMIT_REQUESTS` | 100 |
+| `RATE_LIMIT_WINDOW_SECONDS` | 60 |
+
+See [configuration.md](configuration.md) for all environment variable details.
+
+---
+
+## Endpoints
+
+### Summary
+
+| Method | Path | Purpose | Status |
+|--------|------|---------|--------|
+| GET | `/health` | Full health check with DB and model status | Stable |
+| GET | `/health/live` | Liveness probe (process alive check) | Stable |
+| GET | `/health/ready` | Readiness probe (DB + model ready) | Stable |
+| POST | `/score/{lead_id}` | Score a single lead | Stable |
+| POST | `/score/batch` | Score up to 500 leads in one request | Stable |
+| GET | `/admin/model` | Return active model metadata | Stable |
+| POST | `/admin/reload-model` | Hot-reload model from registry into app state | Stable |
+| POST | `/webhooks/hubspot` | Receive HubSpot webhook events, trigger rescoring | Stable |
+| POST | `/webhooks/salesforce` | Salesforce webhook placeholder | Stub |
+
+---
+
+### GET /health
+
+Full health check. Checks database connectivity and whether a model is loaded. Used by Docker health checks and load balancers.
+
+**Response 200**
+
+```json
+{
+  "status": "healthy",
+  "timestamp": "2026-03-21T12:00:00.000000+00:00",
+  "version": "0.1.0",
+  "environment": "production",
+  "checks": {
+    "database": { "healthy": true },
+    "model_loaded": { "healthy": true, "loaded": true, "version": "v1.0.0" }
+  }
+}
+```
+
+`status` is `"healthy"` when all checks pass, `"degraded"` otherwise. When the model is not loaded, `model_loaded` returns `{"healthy": false, "loaded": false, "message": "No model loaded"}`.
+
+---
+
+### GET /health/live
+
+Kubernetes liveness probe. Returns 200 immediately if the process is running. No dependency checks.
+
+**Response 200**
+
+```json
+{ "status": "alive" }
+```
+
+> This path is excluded from access logging to reduce noise.
+
+---
+
+### GET /health/ready
+
+Kubernetes readiness probe. Returns `ready: true` only when both the database and the model are available.
+
+**Response 200**
+
+```json
+{
+  "ready": true,
+  "checks": {
+    "database": true,
+    "model": true
+  }
+}
+```
+
+When either dependency is unavailable, `ready` is `false` and the corresponding check is `false`.
+
+---
+
+### POST /score/{lead_id}
+
+Score a single lead by its UUID. Fetches features from the database, runs inference, persists the prediction, and returns the result.
+
+**Path parameter:** `lead_id` — UUID of the lead.
+
+**Response 200**
+
+```json
+{
+  "lead_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "score": 0.87,
+  "bucket": "A",
+  "model_version": "v1.0.0",
+  "top_factors": [
+    { "feature": "total_time_spent", "impact": 0.32, "value": 1450 },
+    { "feature": "page_views_per_visit", "impact": 0.21, "value": 4.5 },
+    { "feature": "lead_source_olm", "impact": -0.08, "value": 1 }
+  ],
+  "scored_at": "2026-03-21T12:00:01.234567+00:00"
+}
+```
+
+`score` is a probability in `[0.0, 1.0]`. `bucket` is one of `A`, `B`, `C`, `D` (thresholds configured via `BUCKET_A_THRESHOLD`, `BUCKET_B_THRESHOLD`, `BUCKET_C_THRESHOLD` settings). `top_factors` contains per-prediction SHAP values — `impact` shows how each feature pushed *this lead's* score up (positive) or down (negative). See [ML Model — Explainability](ml-model.md#explainability-with-shap).
+
+**Error responses**
+
+| Condition | Status | Body |
+|-----------|--------|------|
+| Lead UUID not in database | 404 | `{"detail": "Lead not found: <uuid>", "lead_id": "<uuid>"}` |
+| No model loaded | 503 | `{"detail": "Model not available"}` |
+| Feature computation failure | 500 | `{"detail": "<message>", "request_id": "<uuid>"}` |
+
+---
+
+### POST /score/batch
+
+Score up to 500 leads in a single request. Leads that cannot be found are returned in the `errors` list; successfully scored leads appear in `results`.
+
+**Request body**
+
+```json
+{
+  "lead_ids": [
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed"
+  ]
+}
+```
+
+`lead_ids` must contain between 1 and 500 UUIDs.
+
+**Response 200**
+
+```json
+{
+  "results": [
+    {
+      "lead_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "score": 0.87,
+      "bucket": "A",
+      "model_version": "v1.0.0",
+      "top_factors": [
+        { "feature": "total_time_spent", "impact": 0.32, "value": 1450 }
+      ],
+      "scored_at": "2026-03-21T12:00:01.234567+00:00"
+    }
+  ],
+  "errors": [
+    {
+      "lead_id": "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed",
+      "error": "Lead not found"
+    }
+  ]
+}
+```
+
+A 200 is returned even when some leads fail; inspect `errors` to identify partial failures.
+
+---
+
+### GET /admin/model
+
+Return metadata for the currently active model from the `model_registry` table.
+
+**Response 200**
+
+```json
+{
+  "version": "v1.0.0",
+  "metrics": {
+    "roc_auc": 0.91,
+    "f1": 0.78,
+    "precision": 0.82,
+    "recall": 0.74
+  },
+  "feature_columns": [
+    "total_time_spent",
+    "page_views_per_visit",
+    "lead_source_olm"
+  ],
+  "trained_at": "2026-03-20T09:15:00.000000+00:00",
+  "is_active": true
+}
+```
+
+**Error responses**
+
+| Condition | Status | Body |
+|-----------|--------|------|
+| No active model in registry | 404 | `{"detail": "No active model found"}` |
+
+---
+
+### POST /admin/reload-model
+
+Hot-reload the active model from disk into `app.state` without restarting the server. Useful after promoting a new model version in the registry.
+
+**No request body required.**
+
+Uses an `asyncio.Lock` to prevent concurrent reloads from corrupting model state. After loading, the model is validated to ensure it has a `predict_proba` method and the expected sklearn Pipeline structure (a `named_steps` dict containing a `"classifier"` step).
+
+**Response 200**
+
+```json
+{
+  "version": "v1.1.0",
+  "message": "Model v1.1.0 loaded successfully"
+}
+```
+
+**Error responses**
+
+| Condition | Status | Body |
+|-----------|--------|------|
+| No active model in registry | 500 | `{"detail": "No active model in registry"}` |
+| Artifact file missing on disk | 500 | `{"detail": "Model artifact not found: <path>"}` |
+| Load exception | 500 | `{"detail": "Failed to load model: <ExceptionType>"}` |
+| Missing predict_proba | 500 | `{"detail": "Loaded model missing predict_proba method"}` |
+| Bad pipeline structure | 500 | `{"detail": "Loaded model missing expected pipeline structure"}` |
+
+---
+
+### POST /webhooks/hubspot
+
+Receives webhook events from HubSpot, validates the request signature, filters events against configured rescore triggers, and rescores matching leads. See [CRM Integration](crm-integration.md) for the full webhook processing flow.
+
+**Request headers:**
+- `x-hubspot-signature-v3` — HMAC-SHA256 signature (required when `CRM_WEBHOOK_CLIENT_SECRET` is set)
+- `x-hubspot-request-timestamp` — Unix timestamp (rejected if older than 5 minutes)
+
+**Request body:** HubSpot webhook payload (array of subscription events).
+
+**Response 200**
+
+```json
+{ "status": "received", "processed": 2 }
+```
+
+`processed` is the number of leads actually rescored (after filtering and debouncing).
+
+**Error responses**
+
+| Condition | Status | Body |
+|-----------|--------|------|
+| Invalid or missing signature | 401 | `{"detail": "Invalid webhook signature"}` |
+| Malformed JSON body | 400 | `{"detail": "Invalid JSON payload"}` |
+
+---
+
+### POST /webhooks/salesforce
+
+Placeholder endpoint. Returns 200 with a notice that Salesforce webhook processing is not yet implemented. See [CRM Integration — Salesforce Readiness](crm-integration.md#salesforce-readiness).
+
+**Response 200**
+
+```json
+{ "status": "received", "message": "Salesforce webhooks not yet implemented" }
+```
+
+---
+
+## Dependency Injection
+
+Dependencies are defined in `src/api/dependencies.py` across three scopes.
+
+### `get_model(request)` — application scope
+
+Returns `(model: Pipeline, model_version: str)` from `app.state`. Raises `ModelNotLoadedError` (→ 503) if `app.state.model` is `None`. Because the model is loaded once at startup and stored on app state, this dependency does not create any database or IO overhead per request.
+
+### `get_feature_computer()` — engine scope
+
+Returns a `FeatureComputer` instance constructed with `async_engine`. The computer manages its own async sessions internally for feature reads. A new instance is created per call, but the underlying engine is shared at the process level.
+
+### `get_crm_client(request)` — application scope
+
+Returns the `CRMClient` instance (or `None`) from `app.state.crm_client`. Set during lifespan startup based on `CRM_TYPE`.
+
+### `get_scoring_service(request, session)` — per-request scope
+
+Composes the above into a `ScoringService`:
+
+```
+get_model(request)         → model, version
+get_feature_computer()     → feature_computer
+get_crm_client(request)    → CRMClient | None → CRMSyncService | None
+app.state.explainer        → Explainer | None (SHAP TreeExplainer)
+get_settings()             → bucket thresholds
+Depends(get_session)       → async DB session (for prediction writes)
+```
+
+The `ScoringService` is instantiated fresh for each request, ensuring the DB session is properly scoped and cleaned up. When a CRM client is available, a `CRMSyncService` is injected to handle fire-and-forget score writeback after prediction commit. The `Explainer` provides per-prediction SHAP values for `top_factors`; if `None`, the service falls back to global feature importance.
+
+---
+
+## Middleware
+
+All middlewares use the raw ASGI interface (`__call__(scope, receive, send)`) rather than Starlette's `BaseHTTPMiddleware`. This avoids double-reading the request body, gives full control over response header injection, and improves performance on streaming responses.
+
+Middleware executes in the following order (outermost to innermost). In Starlette, the last middleware added via `add_middleware` is outermost:
+
+1. `AuthMiddleware` — outermost, rejects invalid tokens immediately (when `AUTH_ENABLED=true`)
+2. `RateLimitMiddleware` — sliding-window rate limiter per client IP
+3. `RequestIDMiddleware` — injects request ID into scope and response headers
+4. `LoggingMiddleware` — innermost, captures total request duration including all middleware layers
+
+### RequestIDMiddleware (`src/api/middleware/request_id.py`)
+
+For every `http` or `websocket` scope:
+
+1. Reads the `X-Request-ID` request header.
+2. Uses the header value if present; otherwise generates a `uuid4` string.
+3. Stores the ID in `scope["state"]["request_id"]` (accessible downstream as `request.state.request_id`).
+4. Appends `X-Request-ID: <id>` to all response headers.
+
+### RateLimitMiddleware (`src/api/middleware/rate_limit.py`)
+
+For every `http` scope:
+
+1. Extracts client IP from `scope["client"]`.
+2. Checks requests against a sliding window of `max_requests` per `window_seconds` (defaults: 100 / 60s).
+3. Prunes expired timestamps and rejects requests that exceed the limit with a 429 response.
+4. Tracks per-IP request timestamps in memory using `dict[str, list[float]]` with monotonic clock values.
+
+### AuthMiddleware (`src/api/middleware/auth.py`)
+
+For every `http` scope, unless the path is in `exempt_paths`:
+
+1. Reads the `Authorization` header and expects `Bearer <token>`.
+2. SHA-256 hashes the token and queries the `api_keys` table for a matching active key.
+3. Returns 401 if the token is missing, malformed, or not found.
+
+The middleware owns its own `async_sessionmaker` bound to the shared engine. Exempt paths (configurable via `AUTH_EXEMPT_PATHS`) skip authentication entirely.
+
+### LoggingMiddleware (`src/api/middleware/logging.py`)
+
+For every `http` scope, unless the path is `/health/live`:
+
+1. Records `time.monotonic()` before delegating to the next layer.
+2. Captures `status_code` by intercepting the `http.response.start` ASGI message.
+3. After the response completes (in a `finally` block), emits a structlog `http_request` event:
+
+   ```json
+   {
+     "event": "http_request",
+     "method": "POST",
+     "path": "/score/abc123",
+     "status_code": 200,
+     "duration_ms": 42.7,
+     "request_id": "550e8400-e29b-41d4-a716-446655440000"
+   }
+   ```
+
+**Log format** is controlled by `configure_logging(debug)` called at startup:
+
+| Mode | Renderer |
+|------|----------|
+| `DEBUG=true` | `structlog.dev.ConsoleRenderer` (human-readable, coloured) |
+| `DEBUG=false` | `structlog.processors.JSONRenderer` (one JSON object per line) |
+
+---
+
+## Error Handling
+
+Custom exceptions are defined in `src/api/exceptions.py`. Handlers are registered in `create_app()`.
+
+| Exception | HTTP status | Response body |
+|-----------|-------------|---------------|
+| `LeadNotFoundError(lead_id)` | 404 | `{"detail": "Lead not found: <uuid>", "lead_id": "<uuid>"}` |
+| `ModelNotLoadedError()` | 503 | `{"detail": "Model not available"}` |
+| `FeatureComputationError(detail)` | 500 | `{"detail": "<message>", "request_id": "<uuid>"}` |
+| Any unhandled `Exception` | 500 | `{"detail": "Internal server error", "request_id": "<uuid>"}` |
+
+`request_id` in 500 responses is read from `request.state.request_id` (set by `RequestIDMiddleware`). If the middleware has not run (e.g., very early startup failure), it falls back to `"unknown"`.
+
+---
+
+## OpenAPI
+
+Interactive documentation is enabled only when `DEBUG=true`:
+
+| Interface | URL |
+|-----------|-----|
+| Swagger UI | `http://localhost:8000/docs` |
+| ReDoc | `http://localhost:8000/redoc` |
+
+Both URLs return 404 in production. The OpenAPI schema can also be fetched programmatically at `/openapi.json` (controlled by FastAPI separately from the UI toggle).

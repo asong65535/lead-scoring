@@ -1,0 +1,307 @@
+---
+title: ML Model
+description: Feature engineering, XGBoost training, hyperparameter tuning, evaluation, and serialization.
+---
+
+This document covers the full ML pipeline from feature engineering through model serialization.
+
+For how raw data gets into the leads table, see [data-pipeline.md](data-pipeline.md).
+For the `model_registry` table schema, see [database.md](database.md).
+
+---
+
+## Feature Engineering
+
+### FeatureComputer (`src/services/features/computer.py`)
+
+`FeatureComputer` is the orchestrator for feature computation. It accepts an `AsyncEngine` at construction and exposes two async methods:
+
+- `compute(lead_id, as_of_date=None)` — computes features for a single lead.
+- `compute_batch(lead_ids, as_of_dates=None)` — computes features for a list of leads, with a per-lead `as_of_date` dict.
+
+Internally, both methods query the lead and its events via SQLAlchemy (using `selectinload` for eager loading), then call `_compute_for_lead()`, which:
+
+1. Filters events to those with `occurred_at < as_of_date` (point-in-time safety).
+2. **Pre-buckets** filtered events by `event_type` into a `dict[str, list[Event]]` with a special `"_all"` key containing the full list. This avoids redundant per-function filtering across feature categories.
+3. Iterates over all registered features, calling each computation function with `(lead, events_by_type, as_of_date)`. Each call is wrapped in try/catch — if a feature function raises, the error is logged and the feature is left absent (the validation layer applies the YAML default).
+4. Passes raw results through `validate_features()`.
+5. Appends `lead_id` and `computed_at` to the result dict.
+
+`compute_batch()` returns `dict[UUID, dict]` keyed by lead_id (rather than a list), making it robust for datasets with sparse lead availability.
+
+### Feature Registry (`src/services/features/registry.py`)
+
+`FeatureRegistry` loads `config/features.yaml` at import time and holds a singleton instance (`registry`) shared across all definition modules. It maps feature names to computation functions via the `@registry.register("feature_name")` decorator.
+
+Key methods:
+- `register(name)` — decorator that registers a function for a named feature; raises `KeyError` if the name is not in `features.yaml`.
+- `computed_features()` — returns the set of features that have a registered function.
+- `defaulted_features()` — returns features defined in YAML but without a registered function (i.e., firmographic placeholders).
+- `get_function(name)` / `get_default(name)` / `get_metadata(name)` — accessors.
+
+### Validation (`src/services/features/validation.py`)
+
+`validate_features(raw, registry, lead_id=None)` checks each feature against its YAML-defined type:
+
+- `numeric` — must be a finite `int` or `float` (not NaN, not inf).
+- `boolean` — must be exactly `bool`.
+- `categorical` — must be a value in the feature's `categories` list.
+
+If a value is invalid or absent, it is replaced with the YAML `default` and a warning is logged. The function always returns a dict with all 20 features defined in `features.yaml`.
+
+### Feature Categories
+
+Features are defined in `src/services/features/definitions/` and organized into six modules:
+
+| Category | Module | Features |
+|---|---|---|
+| Recency | `recency.py` | `days_since_last_visit`, `days_since_last_email_open`, `days_since_first_touch` |
+| Frequency | `frequency.py` | `total_pageviews_7d`, `total_pageviews_30d`, `total_sessions`, `emails_opened_30d`, `emails_clicked_30d` |
+| Intensity | `intensity.py` | `avg_pages_per_session`, `avg_session_duration_seconds`, `pricing_page_views` |
+| Intent | `intent.py` | `viewed_pricing`, `requested_demo`, `downloaded_content`, `visited_competitor_comparison` |
+| Engagement | `engagement.py` | `engagement_velocity_7d`, `is_engagement_increasing` |
+| Firmographic | `firmographic.py` | `company_size_bucket`, `industry_match_icp`, `job_title_seniority` *(unregistered — see below)* |
+
+The firmographic module intentionally registers no functions. Those features require CRM data not available in the current dataset and will always return their YAML defaults until Phase 7.
+
+### Point-in-Time Support
+
+Every computation function receives `as_of_date` as its third argument. `FeatureComputer._compute_for_lead()` pre-filters the event list to `occurred_at < as_of_date` before passing it to any feature function, ensuring that features cannot look into the future relative to the evaluation date.
+
+---
+
+## Preprocessing (`src/ml/preprocessing.py`)
+
+The preprocessing pipeline handles 17 MVP features: 12 numeric and 5 boolean. Both types are passed through unchanged — XGBoost handles numeric and boolean inputs natively.
+
+**12 numeric features** (`NUMERIC_FEATURES`):
+
+```
+days_since_last_visit, days_since_last_email_open, days_since_first_touch,
+total_pageviews_7d, total_pageviews_30d, total_sessions,
+emails_opened_30d, emails_clicked_30d, avg_pages_per_session,
+avg_session_duration_seconds, pricing_page_views, engagement_velocity_7d
+```
+
+**5 boolean features** (`BOOLEAN_FEATURES`):
+
+```
+viewed_pricing, requested_demo, downloaded_content,
+visited_competitor_comparison, is_engagement_increasing
+```
+
+**3 firmographic placeholders** (`FIRMOGRAPHIC_PLACEHOLDERS`) are excluded from MVP training:
+
+```
+company_size_bucket, industry_match_icp, job_title_seniority
+```
+
+`build_preprocessing_pipeline()` returns a sklearn `Pipeline` wrapping a `ColumnTransformer` with two named transformers: `"numeric"` (passthrough) and `"boolean"` (passthrough). The combined list `MVP_FEATURE_NAMES = NUMERIC_FEATURES + BOOLEAN_FEATURES` defines the 17-column input the model expects.
+
+---
+
+## Training
+
+`scripts/train.py` orchestrates the full training flow. Entry point:
+
+```
+poetry run python scripts/train.py [--tune] [--set-active]
+```
+
+### Dataset (`src/ml/dataset.py`)
+
+`build_training_dataset(engine, test_fraction=0.2)` builds labeled train/test DataFrames:
+
+1. Queries all leads where `converted IS NOT NULL`, joined with the latest event date per lead in a single DB round-trip (using a subquery with `func.max(Event.occurred_at)` outer-joined to leads). Leads with `converted=True` but no `converted_at` are filtered out.
+2. Computes a point-in-time `as_of_date` for each lead via `compute_as_of_date()`:
+   - **Converted leads**: `converted_at - 1 day`
+   - **Non-converted leads**: `min(created_at + 90 days, now, latest_event_at)`
+3. Calls `FeatureComputer.compute_batch()` with the per-lead as_of_date map.
+4. Drops `lead_id`, `computed_at`, and firmographic placeholder columns. Adds `converted` (label) and `as_of_date`.
+5. Sorts by `as_of_date` and splits at the 80th percentile for a **time-based 80/20 split** — earlier records go to train, later records to test.
+
+### Model (`src/ml/trainer.py`)
+
+`train_model(X_train, y_train, X_test, y_test, preprocessing_pipeline, hyperparameters=None)` returns a `TrainResult`.
+
+The model is an `XGBClassifier` wrapped in a sklearn `Pipeline` alongside the preprocessing steps. `scale_pos_weight` is set automatically as `n_negative / n_positive` to handle class imbalance.
+
+**Default hyperparameters** (`DEFAULT_HYPERPARAMETERS`):
+
+| Parameter | Value |
+|---|---|
+| `n_estimators` | 200 |
+| `max_depth` | 6 |
+| `learning_rate` | 0.1 |
+| `colsample_bytree` | 0.8 |
+| `eval_metric` | `logloss` |
+| `random_state` | 42 |
+
+### Optional Tuning (`src/ml/tuning.py`)
+
+The `--tune` flag triggers `tune_hyperparameters(X_train, y_train, preprocessing_pipeline)` before calling `train_model()`. It runs `RandomizedSearchCV` with:
+
+- `n_iter=20` (samples 20 random combinations from the grid)
+- `scoring="roc_auc"`
+- `StratifiedKFold(n_splits=5, shuffle=True, random_state=42)`
+- `n_jobs=-1` (parallel)
+- `random_state=42` (reproducible sampling)
+
+`RandomizedSearchCV` was chosen over `GridSearchCV` because it explores the hyperparameter space more efficiently — 20 random samples often find near-optimal settings faster than an exhaustive grid, especially as the parameter space grows.
+
+**Default parameter grid** (`DEFAULT_PARAM_GRID`):
+
+| Parameter | Values |
+|---|---|
+| `n_estimators` | 100, 200, 300 |
+| `max_depth` | 4, 6, 8 |
+| `learning_rate` | 0.05, 0.1, 0.2 |
+
+The function returns the best hyperparameter dict (unprefixed), which is passed directly to `train_model()`.
+
+---
+
+## Evaluation
+
+After training, `train_model()` evaluates the model on the holdout set and returns these metrics in `TrainResult.metrics`:
+
+| Metric | Description |
+|---|---|
+| `auc_roc` | Area under the ROC curve |
+| `precision` | Positive predictive value |
+| `recall` | Sensitivity / true positive rate |
+| `f1` | Harmonic mean of precision and recall |
+| `log_loss` | Cross-entropy loss |
+| `calibration_error` | Expected Calibration Error (ECE, equal-frequency bins) |
+
+Global feature importances are extracted from `XGBClassifier.feature_importances_` and stored in `TrainResult.feature_importance` as a `{feature_name: float}` dict. These are model-level importances (constant across all predictions). For per-prediction explanations, see the [Explainability](#explainability-with-shap) section below.
+
+### Score Buckets
+
+The model outputs a probability score in [0, 1]. The API maps this to a letter grade using thresholds configurable via environment variables:
+
+| Grade | Condition | Default threshold |
+|---|---|---|
+| A | score ≥ `MODEL_BUCKET_A_THRESHOLD` | 0.7 |
+| B | score ≥ `MODEL_BUCKET_B_THRESHOLD` | 0.4 |
+| C | score ≥ `MODEL_BUCKET_C_THRESHOLD` | 0.2 |
+| D | score < `MODEL_BUCKET_C_THRESHOLD` | — |
+
+---
+
+## Serialization & Registry (`src/ml/serialization.py`)
+
+After training, `scripts/train.py` saves the artifact and registers it in the database.
+
+**`save_model(model, version, metrics, hyperparameters, feature_columns, base_dir=Path("models"))`**
+
+Writes two files to `models/`:
+- `{version}.joblib` — the fitted sklearn `Pipeline` (preprocessing + XGBClassifier).
+- `{version}.meta.json` — metrics, hyperparameters, feature columns, and `trained_at` timestamp.
+
+**`load_model(artifact_path)`**
+
+Loads and returns the sklearn `Pipeline` from a `.joblib` file.
+
+**`next_version(existing_versions)`**
+
+Auto-increments the minor version from the highest existing version string (e.g., `["v1.0", "v1.1"]` → `"v1.2"`). Returns `"v1.0"` when no versions exist. Major bumps are manual and intended for Phase 7+ when the feature set changes.
+
+**`register_model(engine, version, artifact_path, metrics, hyperparameters, feature_columns, set_active=False)`**
+
+Inserts a row into the `model_registry` table. If `set_active=True`, all existing rows are first updated to `is_active=False`, then the new row is inserted with `is_active=True`. Returns the new model's UUID.
+
+See [database.md](database.md) for the `model_registry` table schema.
+
+---
+
+## Explainability with SHAP
+
+### Overview
+
+The `Explainer` class (`src/ml/explainer.py`) provides per-prediction feature explanations using SHAP (SHapley Additive exPlanations). Unlike global feature importance — which ranks features by their overall contribution across all predictions — SHAP values show how each feature pushed a *specific* lead's score up or down.
+
+For example, global importance might show that `pricing_page_views` is the #1 feature overall. But for a particular lead who never viewed pricing, SHAP reveals that `emails_clicked_30d` was what drove *their* high score.
+
+### How it works
+
+`Explainer` wraps SHAP's `TreeExplainer`, which exploits the XGBoost tree structure to compute exact Shapley values in polynomial time (no sampling or approximation). This makes it fast enough for real-time scoring.
+
+**Initialization:** The explainer is created once at API startup alongside the model and refreshed on model reload (`POST /admin/reload-model`). It is not serialized with the model artifact — it is reconstructed from the fitted pipeline each time.
+
+**Methods:**
+
+- `explain(df, n=5)` — explain a single-row DataFrame. Returns the top `n` factors sorted by absolute SHAP value.
+- `explain_batch(df, n=5)` — explain multiple rows. Returns a list of factor lists, one per row.
+
+**Output format:**
+
+```json
+[
+  {"feature": "pricing_page_views", "impact": 0.18, "value": 4},
+  {"feature": "requested_demo", "impact": 0.15, "value": true},
+  {"feature": "days_since_last_visit", "impact": -0.08, "value": 12}
+]
+```
+
+`impact` is the SHAP value for the positive class (conversion). Positive values push the score higher; negative values push it lower. `value` is the lead's actual feature value.
+
+### Fallback behavior
+
+When no explainer is available (e.g., model failed to load), `ScoringService` falls back to global feature importance from `XGBClassifier.feature_importances_`. This produces the same `top_factors` format but with model-level importance values rather than sample-specific SHAP values.
+
+---
+
+## Retraining Pipeline
+
+### Automated Retraining
+
+`scripts/retrain.py` orchestrates weekly retraining. It reuses the same training modules (`build_training_dataset`, `train_model`, `save_model`, `register_model`) with added comparison and drift detection.
+
+### Model Comparison (`src/ml/comparison.py`)
+
+After training, the candidate model is compared against the active model:
+
+| Gate | Metric | Threshold | Direction |
+|------|--------|-----------|-----------|
+| Primary | AUC-ROC | 5% relative drop | higher is better |
+| Secondary | Calibration error | 0.05 absolute increase | lower is better |
+
+Both thresholds are configurable via `RETRAIN_*` environment variables.
+
+### Drift Detection (`src/ml/drift.py`)
+
+Drift is computed from stored `feature_snapshot` data in the `predictions` table:
+
+- **Numeric features:** Population Stability Index (PSI) using quantile-based binning. PSI > 0.2 = significant drift.
+- **Boolean features:** True-rate shift. Shift > 0.2 = significant.
+- **Prediction scores:** Mean, stddev, and distribution PSI compared against training baseline.
+
+Drift results are informational — logged, alerted via webhook, and persisted to `retraining_runs`. They do not block or trigger retraining.
+
+### Run Audit Trail
+
+Every retrain attempt (success, blocked, or failed) writes a `retraining_runs` row with: metrics comparison, drift results, feature baselines, training data stats, hyperparameters, and timing. See [Database](database.md) for schema.
+
+---
+
+## Pipeline Diagram
+
+```mermaid
+flowchart TD
+    leads[(leads table)] --> dataset["build_training_dataset()\nsrc/ml/dataset.py"]
+    features_yaml["config/features.yaml"] --> registry["FeatureRegistry\nsrc/services/features/registry.py"]
+    registry --> computer["FeatureComputer\nsrc/services/features/computer.py"]
+    computer --> dataset
+    dataset --> split["Time-based 80/20 split\n(sort by as_of_date)"]
+    split --> train_df["train_df\n17 MVP features + label"]
+    split --> test_df["test_df\n17 MVP features + label"]
+    train_df --> preprocess["build_preprocessing_pipeline()\nsrc/ml/preprocessing.py\n12 numeric passthrough\n5 boolean passthrough"]
+    preprocess --> trainer["train_model()\nsrc/ml/trainer.py\nXGBClassifier\nscale_pos_weight"]
+    test_df --> trainer
+    trainer --> result["TrainResult\n(model, metrics, feature_importance)"]
+    result --> save["save_model()\nmodels/{version}.joblib\nmodels/{version}.meta.json"]
+    result --> register["register_model()\nmodel_registry row"]
+    result --> explainer["Explainer(model)\nSHAP TreeExplainer\n(created at API startup)"]
+    explainer --> scoring["ScoringService\nexplain() per prediction"]
+```

@@ -1,0 +1,404 @@
+---
+title: Database
+description: PostgreSQL schema, SQLAlchemy models, Alembic migrations, and connection management.
+---
+
+PostgreSQL 15, async SQLAlchemy 2.0, asyncpg driver, Alembic migrations.
+
+## Schema Overview
+
+Six tables are defined. `leads`, `events`, `predictions`, `model_registry`, and `crm_sync_log` inherit `id`, `created_at`, and `updated_at` from `TimestampMixin` (see `src/models/base.py`). The `api_keys` table defines its own `id` and `created_at` columns (no `updated_at`). All `id` columns are UUIDs generated server-side via `gen_random_uuid()`.
+
+```mermaid
+erDiagram
+    leads {
+        uuid id PK
+        timestamptz created_at
+        timestamptz updated_at
+        varchar(50) external_id "UNIQUE NOT NULL"
+        varchar(20) source_system "NOT NULL"
+        varchar(50) lead_origin
+        varchar(100) lead_source
+        varchar(100) country
+        varchar(100) city
+        varchar(100) current_occupation
+        varchar(100) specialization
+        boolean do_not_email "DEFAULT false"
+        boolean do_not_call "DEFAULT false"
+        float total_visits
+        float total_time_spent
+        float page_views_per_visit
+        varchar(100) last_activity
+        varchar(200) tags
+        boolean converted
+        timestamptz converted_at
+    }
+
+    events {
+        uuid id PK
+        timestamptz created_at
+        timestamptz updated_at
+        uuid lead_id FK "NOT NULL"
+        varchar(30) event_type "NOT NULL"
+        varchar(100) event_name
+        jsonb properties
+        timestamptz occurred_at "NOT NULL"
+    }
+
+    predictions {
+        uuid id PK
+        timestamptz created_at
+        timestamptz updated_at
+        uuid lead_id FK "NOT NULL"
+        float score "NOT NULL"
+        varchar(10) bucket "NOT NULL"
+        varchar(20) model_version "NOT NULL"
+        jsonb feature_snapshot
+        jsonb top_factors
+        timestamptz scored_at "NOT NULL DEFAULT now()"
+    }
+
+    model_registry {
+        uuid id PK
+        timestamptz created_at
+        timestamptz updated_at
+        varchar(20) version "UNIQUE NOT NULL"
+        varchar(500) artifact_path "NOT NULL"
+        jsonb metrics
+        jsonb hyperparameters
+        jsonb feature_columns
+        boolean is_active "DEFAULT false"
+        timestamptz trained_at "NOT NULL"
+    }
+
+    crm_sync_log {
+        uuid id PK
+        timestamptz created_at
+        timestamptz updated_at
+        uuid lead_id FK "NOT NULL"
+        varchar(20) source_system "NOT NULL"
+        varchar(100) external_id
+        varchar(50) action "NOT NULL"
+        jsonb payload
+        varchar(20) status "NOT NULL DEFAULT pending"
+        text error_message
+        timestamptz synced_at
+    }
+
+    api_keys {
+        uuid id PK
+        varchar(64) key_hash "UNIQUE NOT NULL"
+        varchar(255) label "NOT NULL"
+        boolean is_active "DEFAULT true"
+        timestamptz created_at
+    }
+
+    retraining_runs {
+        uuid id PK
+        timestamptz created_at
+        timestamptz updated_at
+        varchar(20) run_status "NOT NULL"
+        varchar(20) candidate_version "NOT NULL"
+        varchar(20) active_version_before
+        boolean promoted "NOT NULL"
+        jsonb current_metrics
+        jsonb candidate_metrics
+        jsonb metric_deltas
+        text comparison_reason
+        jsonb drift_result
+        jsonb feature_baselines
+        jsonb training_data_stats
+        jsonb hyperparameters
+        varchar(20) triggered_by "NOT NULL"
+        float duration_seconds
+        text error_message
+        timestamptz started_at "NOT NULL"
+        timestamptz completed_at
+    }
+
+    leads ||--o{ events : "CASCADE delete"
+    leads ||--o{ predictions : "RESTRICT delete"
+    leads ||--o{ crm_sync_log : "RESTRICT delete"
+```
+
+> **TimestampMixin** (`src/models/base.py`): every table gets `id` (UUID PK, `gen_random_uuid()`), `created_at` (timestamptz, `now()`), and `updated_at` (timestamptz, `now()`, updated on each write via `onupdate`).
+
+---
+
+## Tables
+
+### `leads`
+
+Source: `src/models/lead.py`
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| `id` | UUID | NOT NULL | PK, server default `gen_random_uuid()` |
+| `created_at` | timestamptz | NOT NULL | server default `now()` |
+| `updated_at` | timestamptz | NOT NULL | server default `now()`, updated on write |
+| `external_id` | VARCHAR(50) | NOT NULL | UNIQUE |
+| `source_system` | VARCHAR(20) | NOT NULL | |
+| `lead_origin` | VARCHAR(50) | NULL | |
+| `lead_source` | VARCHAR(100) | NULL | |
+| `country` | VARCHAR(100) | NULL | |
+| `city` | VARCHAR(100) | NULL | |
+| `current_occupation` | VARCHAR(100) | NULL | |
+| `specialization` | VARCHAR(100) | NULL | |
+| `do_not_email` | BOOLEAN | NOT NULL | default `false` |
+| `do_not_call` | BOOLEAN | NOT NULL | default `false` |
+| `total_visits` | FLOAT | NULL | |
+| `total_time_spent` | FLOAT | NULL | |
+| `page_views_per_visit` | FLOAT | NULL | |
+| `last_activity` | VARCHAR(100) | NULL | |
+| `tags` | VARCHAR(200) | NULL | |
+| `converted` | BOOLEAN | NULL | |
+| `converted_at` | timestamptz | NULL | added in migration `ca7959e931e2` |
+
+**Indexes:**
+
+| Name | Columns |
+|---|---|
+| `ix_leads_source_system` | `source_system` |
+| `ix_leads_converted` | `converted` |
+
+---
+
+### `events`
+
+Source: `src/models/event.py`
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| `id` | UUID | NOT NULL | PK, server default `gen_random_uuid()` |
+| `created_at` | timestamptz | NOT NULL | server default `now()` |
+| `updated_at` | timestamptz | NOT NULL | server default `now()`, updated on write |
+| `lead_id` | UUID | NOT NULL | FK → `leads.id` ON DELETE CASCADE |
+| `event_type` | VARCHAR(30) | NOT NULL | check constraint (see below) |
+| `event_name` | VARCHAR(100) | NULL | |
+| `properties` | JSONB | NULL | arbitrary event metadata |
+| `occurred_at` | timestamptz | NOT NULL | |
+
+**Check constraint** `ck_events_event_type`: `event_type IN ('page_view', 'email_open', 'email_click', 'form_submission', 'email_unsubscribe')`
+
+**Indexes:**
+
+| Name | Columns | Notes |
+|---|---|---|
+| `ix_events_lead_id_occurred_at` | `lead_id`, `occurred_at` | composite |
+| `ix_events_event_type` | `event_type` | |
+
+---
+
+### `predictions`
+
+Source: `src/models/prediction.py`
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| `id` | UUID | NOT NULL | PK, server default `gen_random_uuid()` |
+| `created_at` | timestamptz | NOT NULL | server default `now()` |
+| `updated_at` | timestamptz | NOT NULL | server default `now()`, updated on write |
+| `lead_id` | UUID | NOT NULL | FK → `leads.id` ON DELETE RESTRICT |
+| `score` | FLOAT | NOT NULL | probability score, 0.0–1.0 |
+| `bucket` | VARCHAR(10) | NOT NULL | check constraint (see below) |
+| `model_version` | VARCHAR(20) | NOT NULL | references `model_registry.version` (no FK) |
+| `feature_snapshot` | JSONB | NULL | feature values at scoring time |
+| `top_factors` | JSONB | NULL | SHAP or ranked feature contributions |
+| `scored_at` | timestamptz | NOT NULL | server default `now()` |
+
+**Check constraint** `ck_predictions_bucket`: `bucket IN ('A', 'B', 'C', 'D')`
+
+**Indexes:**
+
+| Name | Columns | Notes |
+|---|---|---|
+| `ix_predictions_lead_id` | `lead_id` | |
+| `ix_predictions_scored_at` | `scored_at` | |
+| `ix_predictions_lead_id_scored_at` | `lead_id`, `scored_at DESC` | composite, descending scored_at |
+| `ix_predictions_model_version` | `model_version` | |
+
+---
+
+### `model_registry`
+
+Source: `src/models/model_registry.py`
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| `id` | UUID | NOT NULL | PK, server default `gen_random_uuid()` |
+| `created_at` | timestamptz | NOT NULL | server default `now()` |
+| `updated_at` | timestamptz | NOT NULL | server default `now()`, updated on write |
+| `version` | VARCHAR(20) | NOT NULL | UNIQUE |
+| `artifact_path` | VARCHAR(500) | NOT NULL | filesystem or object-store path to model file |
+| `metrics` | JSONB | NULL | evaluation metrics (e.g. AUC-ROC, F1) |
+| `hyperparameters` | JSONB | NULL | training hyperparameters |
+| `feature_columns` | JSONB | NULL | ordered list of feature names used at training |
+| `is_active` | BOOLEAN | NOT NULL | default `false`; only one row should be `true` |
+| `trained_at` | timestamptz | NOT NULL | |
+
+**Indexes:**
+
+| Name | Columns | Notes |
+|---|---|---|
+| `ix_model_registry_active` | `is_active` | partial index: `WHERE is_active = true` |
+
+The partial index makes the active-model lookup (`WHERE is_active = true`) a single-row index scan.
+
+---
+
+### `crm_sync_log`
+
+Source: `src/models/crm_sync_log.py`
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| `id` | UUID | NOT NULL | PK, server default `gen_random_uuid()` |
+| `created_at` | timestamptz | NOT NULL | server default `now()` |
+| `updated_at` | timestamptz | NOT NULL | server default `now()`, updated on write |
+| `lead_id` | UUID | NOT NULL | FK → `leads.id` ON DELETE RESTRICT |
+| `source_system` | VARCHAR(20) | NOT NULL | |
+| `external_id` | VARCHAR(100) | NULL | CRM record ID in the external system |
+| `action` | VARCHAR(50) | NOT NULL | e.g. `create`, `update` |
+| `payload` | JSONB | NULL | request payload sent to CRM |
+| `status` | VARCHAR(20) | NOT NULL | server default `'pending'`; check constraint |
+| `error_message` | TEXT | NULL | populated on failure |
+| `synced_at` | timestamptz | NULL | timestamp of successful sync |
+
+**Check constraint** `ck_crm_sync_log_status`: `status IN ('success', 'failed', 'pending')`
+
+**Indexes:**
+
+| Name | Columns |
+|---|---|
+| `ix_crm_sync_log_lead_id` | `lead_id` |
+| `ix_crm_sync_log_status` | `status` |
+| `ix_crm_sync_log_source_external` | `source_system`, `external_id` |
+
+---
+
+### `retraining_runs`
+
+Source: `src/models/retraining_run.py`
+
+Tracks every retraining attempt for audit and analytics.
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| `id` | UUID | NOT NULL | PK |
+| `created_at` | timestamptz | NOT NULL | auto |
+| `updated_at` | timestamptz | NOT NULL | auto |
+| `run_status` | VARCHAR(20) | NOT NULL | CHECK: `success`, `blocked`, `failed` |
+| `candidate_version` | VARCHAR(20) | NOT NULL | |
+| `active_version_before` | VARCHAR(20) | NULL | version that was active when run started |
+| `promoted` | BOOLEAN | NOT NULL | |
+| `current_metrics` | JSONB | NULL | active model's metrics |
+| `candidate_metrics` | JSONB | NULL | new model's metrics |
+| `metric_deltas` | JSONB | NULL | per-metric absolute + relative changes |
+| `comparison_reason` | TEXT | NULL | human-readable promote/block reason |
+| `drift_result` | JSONB | NULL | PSI per feature, prediction drift |
+| `feature_baselines` | JSONB | NULL | training distribution summaries |
+| `training_data_stats` | JSONB | NULL | row counts, class balance |
+| `hyperparameters` | JSONB | NULL | |
+| `triggered_by` | VARCHAR(20) | NOT NULL | `scheduled`, `manual`, `force` |
+| `duration_seconds` | FLOAT | NULL | wall-clock time |
+| `error_message` | TEXT | NULL | populated on failed runs |
+| `started_at` | timestamptz | NOT NULL | |
+| `completed_at` | timestamptz | NULL | |
+
+**Check constraint** `ck_retraining_runs_status`: `run_status IN ('success', 'blocked', 'failed')`
+
+**Indexes:**
+
+| Name | Columns |
+|---|---|
+| `ix_retraining_runs_status` | `run_status` |
+| `ix_retraining_runs_started_at` | `started_at` |
+
+---
+
+### `api_keys`
+
+Source: `src/models/api_key.py`
+
+Stores hashed API keys for Bearer token authentication. Raw keys are never stored — only the SHA-256 hash is persisted.
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| `id` | UUID | NOT NULL | PK, server default `gen_random_uuid()` |
+| `key_hash` | VARCHAR(64) | NOT NULL | UNIQUE, indexed; SHA-256 hex digest |
+| `label` | VARCHAR(255) | NOT NULL | human-readable identifier for the key |
+| `is_active` | BOOLEAN | NOT NULL | server default `true`; set to `false` on revocation |
+| `created_at` | timestamptz | NOT NULL | server default `now()` |
+
+**Indexes:**
+
+| Name | Columns | Notes |
+|---|---|---|
+| `ix_api_keys_key_hash` | `key_hash` | unique index for auth lookups |
+
+Keys are managed via `scripts/manage_keys.py` (create, revoke, list). See [Deployment](deployment.md) for usage.
+
+---
+
+## Migrations
+
+Migrations live under `alembic/` and are configured in `alembic.ini`. The migration runner in `alembic/env.py` uses an async engine (`create_async_engine`) so migrations run against asyncpg. Offline mode uses `settings.database.sync_url`; online mode uses `settings.database.url`.
+
+### Migration history
+
+| Revision | Description |
+|---|---|
+| `49ec235a15ed` | Initial schema — creates `leads`, `model_registry`, `crm_sync_log`, `predictions` |
+| `ca7959e931e2` | Adds `events` table and `converted_at` column to `leads` |
+| `ff52009bc0c5` | Adds `api_keys` table with unique index on `key_hash` |
+| `e4ef370cc0c3` | Adds `retraining_runs` table with status check constraint and indexes |
+
+### Common commands
+
+```bash
+# Apply all pending migrations
+alembic upgrade head
+
+# Roll back the most recent migration
+alembic downgrade -1
+
+# Generate a new migration from ORM changes
+alembic revision --autogenerate -m "description"
+
+# Show current revision applied to the database
+alembic current
+
+# Show full migration history
+alembic history
+```
+
+---
+
+## Connection Management
+
+Source: `src/models/database.py`
+
+**Engine** — created with `create_async_engine` (asyncpg driver). Pool parameters come from `settings.database`:
+
+| Parameter | Setting key / value |
+|---|---|
+| `pool_size` | `settings.database.pool_size` |
+| `max_overflow` | `settings.database.max_overflow` |
+| `pool_timeout` | `30` (hardcoded) |
+| `pool_pre_ping` | `True` (hardcoded) |
+
+`pool_timeout=30` ensures connection acquisition fails fast (30s) instead of hanging indefinitely when the pool is exhausted. `pool_pre_ping=True` sends a lightweight `SELECT 1` to detect stale connections (e.g., after a DB restart) before handing them to application code.
+
+**Session factory** — `AsyncSessionLocal` is an `async_sessionmaker` bound to the engine with `expire_on_commit=False`. Disabling expire-on-commit means ORM objects remain accessible after `session.commit()` without triggering lazy-load queries.
+
+**`get_session()` dependency** — an async generator intended for FastAPI `Depends()`. It yields a session, rolls back on any exception, and closes the session on exit:
+
+```python
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
+```
